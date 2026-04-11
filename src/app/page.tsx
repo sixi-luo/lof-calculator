@@ -414,10 +414,17 @@ export default function Home() {
       const historyResults: Record<string, LOFHistory> = { ...historyData }
       
       for (const item of sortedResults) {
-        if (!item.error && item.code) {
+        // 检查是否已有历史数据（从之前的缓存或获取）
+        const existingHistory = historyData[item.code]
+        
+        // 如果已有有效的历史数据，直接使用
+        if (existingHistory && existingHistory.history && existingHistory.history.length > 0) {
+          historyResults[item.code] = existingHistory
+        } else if (!item.error && item.code) {
+          // 没有历史数据且主数据无错误，尝试获取
           const { data: cachedHistory, isStale } = dataCache.get<LOFHistory>('history', item.code, false)
           
-          if (!isStale && cachedHistory) {
+          if (!isStale && cachedHistory && cachedHistory.history?.length > 0) {
             historyResults[item.code] = cachedHistory
           } else {
             try {
@@ -427,7 +434,7 @@ export default function Home() {
               histResult._cachedAt = now
               historyResults[item.code] = histResult
               
-              if (!histResult.error) {
+              if (!histResult.error && histResult.history?.length > 0) {
                 dataCache.set('history', item.code, histResult)
               }
             } catch (e) {
