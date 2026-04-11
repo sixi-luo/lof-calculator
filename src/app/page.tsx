@@ -862,7 +862,7 @@ export default function Home() {
                       </tr>
                       
                       {/* 历史数据展开行 */}
-                      {expandedCode === item.code && historyData[item.code] && !item.error && (
+                      {expandedCode === item.code && historyData[item.code] && historyData[item.code].history && historyData[item.code].history.length > 0 && (
                         <tr>
                           <td colSpan={11} className="px-4 py-4 bg-slate-50">
                             <div className="flex items-center justify-between mb-2">
