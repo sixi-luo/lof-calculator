@@ -424,6 +424,8 @@ export default function Home() {
           // 没有历史数据且主数据无错误，尝试获取
           const { data: cachedHistory, isStale } = dataCache.get<LOFHistory>('history', item.code, false)
           
+          console.log(`[历史] ${item.code}: 缓存存在=${!!cachedHistory}, 数据过期=${isStale}, 历史数组长度=${cachedHistory?.history?.length}`)
+          
           if (!isStale && cachedHistory && cachedHistory.history?.length > 0) {
             historyResults[item.code] = cachedHistory
           } else {
@@ -431,6 +433,7 @@ export default function Home() {
               const configParam = encodeURIComponent(JSON.stringify(customConfigs))
               const histResponse = await fetch(`/api/lof?action=history&code=${item.code}&config=${configParam}`)
               const histResult = await histResponse.json()
+              console.log(`[历史API] ${item.code}: error=${histResult.error}, history长度=${histResult.history?.length}`)
               histResult._cachedAt = now
               historyResults[item.code] = histResult
               
@@ -444,6 +447,7 @@ export default function Home() {
         }
       }
       
+      console.log('[历史结果]', Object.keys(historyResults).map(k => `${k}: ${historyResults[k]?.history?.length || 0}条`))
       setHistoryData(historyResults)
       setCacheStats(dataCache.getStats())
       
