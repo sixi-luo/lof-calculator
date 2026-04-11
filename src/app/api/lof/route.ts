@@ -535,97 +535,10 @@ async function getSinaLOFKline(fundCode: string, count: number = 30): Promise<{ 
 // ============================================================
 // 统一行情接口
 // ============================================================
-
-// 东方财富指数K线获取
-async function getEMIndexKline(indexCode: string, exchange: string, count: number = 30): Promise<{ data: KlineItem[]; source: string }> {
-  return serverCache.getOrFetch(
-    'em_index_kline',
-    async () => {
-      try {
-        // 东方财富指数API
-        const secid = exchange === 'SH' ? `1.${indexCode}` : `0.${indexCode}`
-        const url = `https://push2his.eastmoney.com/api/qt/stock/kline/get?secid=${secid}&fields1=f1,f2,f3,f4,f5,f6&fields2=f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61&klt=101&fqt=0&end=20500101&lmt=${count}`
-        const response = await fetch(url, { headers: EM_HEADERS, signal: AbortSignal.timeout(15000) })
-        if (!response.ok) return { data: [], source: '东财API' }
-        const result = await response.json()
-        
-        if (result?.data?.klines && Array.isArray(result.data.klines)) {
-          const klines: KlineItem[] = result.data.klines.map((line: string) => {
-            const parts = line.split(',')
-            const date = parts[0]
-            const open = parseFloat(parts[1])
-            const close = parseFloat(parts[2])
-            const high = parseFloat(parts[3])
-            const low = parseFloat(parts[4])
-            // change_percent 在第10个位置 (f60)
-            const changePercent = parts[9] ? parseFloat(parts[9]) : null
-            
-            return {
-              date,
-              open: isNaN(open) ? null : open,
-              close: isNaN(close) ? null : close,
-              high: isNaN(high) ? null : high,
-              low: isNaN(low) ? null : low,
-              change_percent: isNaN(changePercent!) ? null : changePercent,
-            }
-          })
-          return { data: klines, source: '东财API' }
-        }
-        return { data: [], source: '东财API' }
-      } catch {
-        return { data: [], source: '东财API' }
-      }
-    },
-    { forceRefresh: false, keyParts: [indexCode, exchange, String(count)] }
-  )
-}
-
-// 东方财富指数实时行情
-async function getEMIndexQuote(indexCode: string, exchange: string): Promise<{ data: StockQuote | null; source: string }> {
-  return serverCache.getOrFetch(
-    'em_index_quote',
-    async () => {
-      try {
-        const secid = exchange === 'SH' ? `1.${indexCode}` : `0.${indexCode}`
-        const url = `https://push2.eastmoney.com/api/qt/stock/get?secid=${secid}&fields=f43,f57,f58,f60,f169`
-        const response = await fetch(url, { headers: EM_HEADERS, signal: AbortSignal.timeout(15000) })
-        if (!response.ok) return { data: null, source: '东财API' }
-        const result = await response.json()
-        
-        if (result?.data) {
-          const d = result.data
-          return {
-            data: {
-              code: indexCode,
-              name: d.f58 || '',
-              price: d.f43 ? d.f43 / 100 : null,
-              change_percent: d.f60 ? d.f60 / 100 : null,
-              change: d.f43 && d.f57 ? (d.f43 - d.f57) / 100 : null,
-            },
-            source: '东财API'
-          }
-        }
-        return { data: null, source: '东财API' }
-      } catch {
-        return { data: null, source: '东财API' }
-      }
-    },
-    { forceRefresh: false, keyParts: [indexCode, exchange] }
-  )
-}
-
 async function getQuote(codeInfo: CodeInfo): Promise<{ data: StockQuote | null; source: string }> {
   if (codeInfo.type === 'lof') {
     const data = await getEMLOFQuote(codeInfo.code)
     return { data: data.data, source: data.source }
-  }
-  
-  // A股指数：优先东方财富API
-  if (codeInfo.type === 'index' && codeInfo.market === 'A' && codeInfo.exchange) {
-    const emData = await getEMIndexQuote(codeInfo.code, codeInfo.exchange)
-    if (emData.data?.price !== null && emData.data?.price !== undefined) {
-      return emData
-    }
   }
   
   // 港股/美股指数：优先Yahoo Finance，失败则尝试TickFlow
@@ -664,13 +577,14 @@ async function getQuote(codeInfo: CodeInfo): Promise<{ data: StockQuote | null; 
 async function getKline(codeInfo: CodeInfo, count: number = 30): Promise<{ data: KlineItem[]; source: string }> {
   if (codeInfo.type === 'lof') return getSinaLOFKline(codeInfo.code, count)
   
-  // 港股/美股指数：优先Yahoo Finance
+  // 港股/美股指数：优先Yahoo Finance，失败则尝试TickFlow
   if (codeInfo.type === 'index' && (codeInfo.market === 'HK' || codeInfo.market === 'US')) {
     const yahooSymbol = codeInfo.formatted.yahoo || codeInfo.code
     const yahooData = await getYahooKline(yahooSymbol, count)
     if (yahooData.data.length > 0 && yahooData.data.some(item => item.close !== null)) {
       return yahooData
     }
+    // Yahoo失败，尝试TickFlow（如果有tickflow格式）
     if (codeInfo.formatted.tickflow) {
       const tickflowData = await getTickflowKline(codeInfo.formatted.tickflow, count)
       if (tickflowData.data.length > 0 && tickflowData.data.some(item => item.close !== null)) {
@@ -680,15 +594,7 @@ async function getKline(codeInfo: CodeInfo, count: number = 30): Promise<{ data:
     return { data: [], source: 'none' }
   }
   
-  // A股指数：优先使用东方财富API
-  if (codeInfo.type === 'index' && codeInfo.market === 'A' && codeInfo.exchange) {
-    const emData = await getEMIndexKline(codeInfo.code, codeInfo.exchange, count)
-    if (emData.data.length > 0) {
-      return emData
-    }
-  }
-  
-  // A股股票/其他：优先Yahoo Finance，失败则TickFlow
+  // A股/港股/美股：优先Yahoo Finance，失败则TickFlow
   if (codeInfo.formatted.yahoo) {
     const yahooData = await getYahooKline(codeInfo.formatted.yahoo, count)
     if (yahooData.data.length > 0 && yahooData.data.some(item => item.close !== null)) {
@@ -701,7 +607,60 @@ async function getKline(codeInfo: CodeInfo, count: number = 30): Promise<{ data:
       return tickflowData
     }
   }
+  
+  // A股指数回退：尝试东方财富API
+  if (codeInfo.type === 'index' && codeInfo.market === 'A' && codeInfo.exchange) {
+    const emData = await getEMIndexKline(codeInfo.code, codeInfo.exchange, count)
+    if (emData.data.length > 0) {
+      return emData
+    }
+  }
+  
   return { data: [], source: 'none' }
+}
+
+// ============================================================
+// 东方财富指数K线获取
+// ============================================================
+async function getEMIndexKline(indexCode: string, exchange: string, count: number = 30): Promise<{ data: KlineItem[]; source: string }> {
+  return serverCache.getOrFetch(
+    'em_index_kline',
+    async () => {
+      try {
+        const secid = exchange === 'SH' ? `1.${indexCode}` : `0.${indexCode}`
+        const url = `https://push2his.eastmoney.com/api/qt/stock/kline/get?secid=${secid}&fields1=f1,f2,f3,f4,f5,f6&fields2=f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61&klt=101&fqt=0&end=20500101&lmt=${count}`
+        const response = await fetch(url, { headers: EM_HEADERS, signal: AbortSignal.timeout(15000) })
+        if (!response.ok) return { data: [], source: '东财API' }
+        const result = await response.json()
+        
+        if (result?.data?.klines && Array.isArray(result.data.klines)) {
+          const klines: KlineItem[] = result.data.klines.map((line: string) => {
+            const parts = line.split(',')
+            const date = parts[0]
+            const open = parseFloat(parts[1])
+            const close = parseFloat(parts[2])
+            const high = parseFloat(parts[3])
+            const low = parseFloat(parts[4])
+            const changePercent = parts.length >= 11 ? parseFloat(parts[10]) : null
+            
+            return {
+              date,
+              open: isNaN(open) ? null : open,
+              close: isNaN(close) ? null : close,
+              high: isNaN(high) ? null : high,
+              low: isNaN(low) ? null : low,
+              change_percent: isNaN(changePercent!) ? null : changePercent,
+            }
+          })
+          return { data: klines, source: '东财API' }
+        }
+        return { data: [], source: '东财API' }
+      } catch {
+        return { data: [], source: '东财API' }
+      }
+    },
+    { forceRefresh: false, keyParts: [indexCode, exchange, String(count)] }
+  )
 }
 
 // ============================================================
@@ -957,8 +916,8 @@ async function getHistoryData(code: string, customConfig: Record<string, LOFConf
     
     // 创建指数数据映射：date -> { index_code -> change_percent }
     const indexChangesByDate: Record<string, Record<string, number | null>> = {}
-    for (const [indexCode, indexKline] of Object.entries(indexHistories)) {
-      for (const item of indexKline) {
+    for (const [indexCode, klineData] of Object.entries(indexHistories)) {
+      for (const item of klineData) {
         if (!indexChangesByDate[item.date]) indexChangesByDate[item.date] = {}
         indexChangesByDate[item.date][indexCode] = item.change_percent
       }
