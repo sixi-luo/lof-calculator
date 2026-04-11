@@ -453,19 +453,36 @@ async function getEMLOFQuote(fundCode: string): Promise<{ data: StockQuote | nul
   return serverCache.getOrFetch(
     'em_lof_quote',
     async () => {
-      try {
-        const url = `https://push2delay.eastmoney.com/api/qt/stock/get?secid=0.${fundCode}&fields=f43,f57,f58,f170,f46`
-        const response = await fetch(url, { headers: EM_HEADERS, signal: AbortSignal.timeout(15000) })
-        if (!response.ok) return { data: null, source: '东财API' }
-        const result = await response.json()
-        if (result?.data) {
-          const d = result.data
-          return { data: { code: fundCode, name: d.f58 || '', price: d.f43 ? d.f43 / 1000 : null, change_percent: d.f170 ? d.f170 / 100 : null, change: d.f43 && d.f46 ? (d.f43 - d.f46) / 1000 : null }, source: '东财API' }
+      const maxRetries = 3
+      let lastError: Error | null = null
+      
+      for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+          const url = `https://push2delay.eastmoney.com/api/qt/stock/get?secid=0.${fundCode}&fields=f43,f57,f58,f170,f46`
+          const response = await fetch(url, { headers: EM_HEADERS, signal: AbortSignal.timeout(15000) })
+          if (!response.ok) throw new Error(`HTTP ${response.status}`)
+          const result = await response.json()
+          if (result?.data) {
+            const d = result.data
+            // 验证数据有效性
+            if (d.f43 !== undefined && d.f58 !== undefined) {
+              return { data: { code: fundCode, name: d.f58 || '', price: d.f43 ? d.f43 / 1000 : null, change_percent: d.f170 ? d.f170 / 100 : null, change: d.f43 && d.f46 ? (d.f43 - d.f46) / 1000 : null }, source: '东财API' }
+            }
+          }
+          throw new Error('无效的API响应格式')
+        } catch (error) {
+          lastError = error as Error
+          console.warn(`获取LOF ${fundCode} 行情失败 (尝试 ${attempt}/${maxRetries}):`, error)
+          
+          if (attempt < maxRetries) {
+            // 指数退避延迟
+            await new Promise(resolve => setTimeout(resolve, 1000 * attempt))
+          }
         }
-        return { data: null, source: '东财API' }
-      } catch {
-        return { data: null, source: '东财API' }
       }
+      
+      console.error(`获取LOF ${fundCode} 行情彻底失败:`, lastError)
+      return { data: null, source: '东财API' }
     },
     { forceRefresh: false, keyParts: [fundCode] }
   )
@@ -475,24 +492,41 @@ async function getSinaLOFKline(fundCode: string, count: number = 30): Promise<{ 
   return serverCache.getOrFetch(
     'sina_lof_kline',
     async () => {
-      try {
-        const market = fundCode.startsWith('16') ? 'sz' : 'sh'
-        const url = `https://quotes.sina.cn/cn/api/json_v2.php/CN_MarketDataService.getKLineData?symbol=${market}${fundCode}&scale=240&ma=no&datalen=${count}`
-        const response = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' }, signal: AbortSignal.timeout(15000) })
-        if (!response.ok) return { data: [], source: '新浪API' }
-        const result = await response.json()
-        if (Array.isArray(result)) {
-          const klines: KlineItem[] = result.map((item: any, i: number) => {
-            const prevClose = i > 0 ? parseFloat(result[i - 1].close) : null
-            const currentClose = parseFloat(item.close)
-            return { date: item.day, open: parseFloat(item.open) || null, close: currentClose || null, high: parseFloat(item.high) || null, low: parseFloat(item.low) || null, change_percent: prevClose && currentClose ? Math.round(((currentClose - prevClose) / prevClose) * 10000) / 100 : null }
-          })
-          return { data: klines, source: '新浪API' }
+      const maxRetries = 3
+      let lastError: Error | null = null
+      
+      for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+          const market = fundCode.startsWith('16') ? 'sz' : 'sh'
+          const url = `https://quotes.sina.cn/cn/api/json_v2.php/CN_MarketDataService.getKLineData?symbol=${market}${fundCode}&scale=240&ma=no&datalen=${count}`
+          const response = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' }, signal: AbortSignal.timeout(15000) })
+          if (!response.ok) throw new Error(`HTTP ${response.status}`)
+          const result = await response.json()
+          if (Array.isArray(result) && result.length > 0) {
+            const klines: KlineItem[] = result.map((item: any, i: number) => {
+              const prevClose = i > 0 ? parseFloat(result[i - 1].close) : null
+              const currentClose = parseFloat(item.close)
+              return { date: item.day, open: parseFloat(item.open) || null, close: currentClose || null, high: parseFloat(item.high) || null, low: parseFloat(item.low) || null, change_percent: prevClose && currentClose ? Math.round(((currentClose - prevClose) / prevClose) * 10000) / 100 : null }
+            })
+            // 验证数据有效性：至少有一些数据有收盘价
+            if (klines.some(item => item.close !== null)) {
+              return { data: klines, source: '新浪API' }
+            }
+          }
+          throw new Error('无效的API响应格式或空数据')
+        } catch (error) {
+          lastError = error as Error
+          console.warn(`获取LOF ${fundCode} K线失败 (尝试 ${attempt}/${maxRetries}):`, error)
+          
+          if (attempt < maxRetries) {
+            // 指数退避延迟
+            await new Promise(resolve => setTimeout(resolve, 1000 * attempt))
+          }
         }
-        return { data: [], source: '新浪API' }
-      } catch {
-        return { data: [], source: '新浪API' }
       }
+      
+      console.error(`获取LOF ${fundCode} K线彻底失败:`, lastError)
+      return { data: [], source: '新浪API' }
     },
     { forceRefresh: false, keyParts: [fundCode, String(count)] }
   )
@@ -506,35 +540,72 @@ async function getQuote(codeInfo: CodeInfo): Promise<{ data: StockQuote | null; 
     const data = await getEMLOFQuote(codeInfo.code)
     return { data: data.data, source: data.source }
   }
+  
+  // 港股/美股指数：优先Yahoo Finance，失败则尝试TickFlow
   if (codeInfo.type === 'index' && (codeInfo.market === 'HK' || codeInfo.market === 'US')) {
     const yahooSymbol = codeInfo.formatted.yahoo || codeInfo.code
-    return getYahooQuote(yahooSymbol)
+    const yahooData = await getYahooQuote(yahooSymbol)
+    if (yahooData.data?.price !== null && yahooData.data?.price !== undefined) {
+      return yahooData
+    }
+    // Yahoo失败，尝试TickFlow（如果有tickflow格式）
+    if (codeInfo.formatted.tickflow) {
+      const tickflowData = await getTickflowQuote(codeInfo.formatted.tickflow, codeInfo)
+      if (tickflowData.data?.price !== null && tickflowData.data?.price !== undefined) {
+        return tickflowData
+      }
+    }
+    return { data: null, source: 'none' }
   }
+  
   // A股/港股/美股：优先Yahoo Finance，失败则TickFlow
   if (codeInfo.formatted.yahoo) {
-    const data = await getYahooQuote(codeInfo.formatted.yahoo)
-    if (data.data) return data
+    const yahooData = await getYahooQuote(codeInfo.formatted.yahoo)
+    if (yahooData.data?.price !== null && yahooData.data?.price !== undefined) {
+      return yahooData
+    }
   }
   if (codeInfo.formatted.tickflow) {
-    const data = await getTickflowQuote(codeInfo.formatted.tickflow, codeInfo)
-    if (data.data) return data
+    const tickflowData = await getTickflowQuote(codeInfo.formatted.tickflow, codeInfo)
+    if (tickflowData.data?.price !== null && tickflowData.data?.price !== undefined) {
+      return tickflowData
+    }
   }
   return { data: null, source: 'none' }
 }
 
 async function getKline(codeInfo: CodeInfo, count: number = 30): Promise<{ data: KlineItem[]; source: string }> {
   if (codeInfo.type === 'lof') return getSinaLOFKline(codeInfo.code, count)
+  
+  // 港股/美股指数：优先Yahoo Finance，失败则尝试TickFlow
   if (codeInfo.type === 'index' && (codeInfo.market === 'HK' || codeInfo.market === 'US')) {
-    return getYahooKline(codeInfo.formatted.yahoo || codeInfo.code, count)
+    const yahooSymbol = codeInfo.formatted.yahoo || codeInfo.code
+    const yahooData = await getYahooKline(yahooSymbol, count)
+    if (yahooData.data.length > 0 && yahooData.data.some(item => item.close !== null)) {
+      return yahooData
+    }
+    // Yahoo失败，尝试TickFlow（如果有tickflow格式）
+    if (codeInfo.formatted.tickflow) {
+      const tickflowData = await getTickflowKline(codeInfo.formatted.tickflow, count)
+      if (tickflowData.data.length > 0 && tickflowData.data.some(item => item.close !== null)) {
+        return tickflowData
+      }
+    }
+    return { data: [], source: 'none' }
   }
+  
   // A股/港股/美股：优先Yahoo Finance，失败则TickFlow
   if (codeInfo.formatted.yahoo) {
-    const data = await getYahooKline(codeInfo.formatted.yahoo, count)
-    if (data.data.length > 0) return data
+    const yahooData = await getYahooKline(codeInfo.formatted.yahoo, count)
+    if (yahooData.data.length > 0 && yahooData.data.some(item => item.close !== null)) {
+      return yahooData
+    }
   }
   if (codeInfo.formatted.tickflow) {
-    const data = await getTickflowKline(codeInfo.formatted.tickflow, count)
-    if (data.data.length > 0) return data
+    const tickflowData = await getTickflowKline(codeInfo.formatted.tickflow, count)
+    if (tickflowData.data.length > 0 && tickflowData.data.some(item => item.close !== null)) {
+      return tickflowData
+    }
   }
   return { data: [], source: 'none' }
 }
@@ -775,42 +846,112 @@ async function getHistoryData(code: string, customConfig: Record<string, LOFConf
     }
 
     const config = getLOFConfig(codeInfo.code, customConfig)
-    const firstIndex = config.indices[0] || {}
     const { data: navHistory, source: navSource } = await getEMFundNavHistory(codeInfo.code, 35)
 
-    let indexKline: KlineItem[] = []
-    if (!firstIndex.is_manual && firstIndex.index_code) {
-      const indexCodeInfo = parseCode(firstIndex.index_code)
-      const { data } = await getKline(indexCodeInfo, 35)
-      indexKline = data
+    // 获取所有指数的历史数据
+    const indexHistories: Record<string, KlineItem[]> = {}
+    for (const idx of config.indices) {
+      if (!idx.is_manual && idx.index_code) {
+        const indexCodeInfo = parseCode(idx.index_code)
+        const { data } = await getKline(indexCodeInfo, 35)
+        indexHistories[idx.index_code] = data
+      }
     }
 
     const navByDate = Object.fromEntries(navHistory.map(item => [item.date, item]))
     const priceByDate = Object.fromEntries(klineData.map(item => [item.date, item]))
-    const indexByDate = Object.fromEntries(indexKline.map(item => [item.date, item]))
-    const allDates = Object.keys(navByDate).sort().reverse()
+    
+    // 创建指数数据映射：date -> { index_code -> change_percent }
+    const indexChangesByDate: Record<string, Record<string, number | null>> = {}
+    for (const [indexCode, klineData] of Object.entries(indexHistories)) {
+      for (const item of klineData) {
+        if (!indexChangesByDate[item.date]) indexChangesByDate[item.date] = {}
+        indexChangesByDate[item.date][indexCode] = item.change_percent
+      }
+    }
 
-    const history = allDates.slice(0, 30).map((date, i) => {
+    const allDates = Object.keys(navByDate).sort().reverse()
+    const historyDates = allDates.slice(0, 30)
+
+    const history = historyDates.map((date, i) => {
       const navItem = navByDate[date] || {}
       const priceItem = priceByDate[date] || {}
-      const indexItem = indexByDate[date] || {}
       const nav = navItem.nav
       const price = priceItem.close
-      const indexChange = indexItem.change_percent
       const premium = nav && price ? Math.round((price - nav) / nav * 10000) / 100 : null
-      let estimatedNav: number | null = null, estimationError: number | null = null
-      const prevDate = allDates[i + 1]
-      if (prevDate && indexChange !== null) {
-        const prevNav = navByDate[prevDate]?.nav
-        if (prevNav) {
-          estimatedNav = Math.round(prevNav * (1 + indexChange / 100 * (firstIndex.coefficient || 0.95)) * 10000) / 10000
-          if (nav && estimatedNav) estimationError = Math.round((nav - estimatedNav) / estimatedNav * 10000) / 100
+      
+      let estimatedNav: number | null = null
+      let estimationError: number | null = null
+      let totalIndexChange: number | null = null
+
+      // 查找前一个有净值的日期
+      let prevDate: string | null = null
+      for (let j = i + 1; j < allDates.length; j++) {
+        if (navByDate[allDates[j]]?.nav) {
+          prevDate = allDates[j]
+          break
         }
       }
-      return { date, nav, accumulated_nav: navItem.accumulated_nav, price, premium, index_change: indexChange, estimated_nav: estimatedNav, estimation_error: estimationError }
+
+      if (prevDate && navByDate[prevDate]?.nav) {
+        const prevNav = navByDate[prevDate].nav!
+        const indexChanges = indexChangesByDate[date]
+        
+        // 计算加权平均指数涨跌幅（与实时计算逻辑一致）
+        let totalChange = 0
+        let totalCoefficient = 0
+        let hasValidIndex = false
+        
+        for (const idx of config.indices) {
+          if (idx.is_manual) continue // 手动输入无历史数据
+          if (!idx.index_code) continue
+          
+          const changePercent = indexChanges?.[idx.index_code]
+          if (changePercent !== null && changePercent !== undefined) {
+            totalChange += changePercent * (idx.coefficient || 0.95)
+            totalCoefficient += (idx.coefficient || 0.95)
+            hasValidIndex = true
+          }
+        }
+        
+        if (hasValidIndex && totalCoefficient > 0) {
+          totalIndexChange = totalChange / totalCoefficient
+          estimatedNav = Math.round(prevNav * (1 + totalIndexChange / 100) * 10000) / 10000
+          if (nav && estimatedNav) {
+            estimationError = Math.round((nav - estimatedNav) / estimatedNav * 10000) / 100
+          }
+        }
+      }
+
+      // 如果没有多个指数，尝试使用第一个指数的涨跌幅（向后兼容）
+      let singleIndexChange: number | null = null
+      if (totalIndexChange === null && config.indices[0] && !config.indices[0].is_manual && config.indices[0].index_code) {
+        singleIndexChange = indexChangesByDate[date]?.[config.indices[0].index_code] ?? null
+      }
+
+      return {
+        date,
+        nav,
+        accumulated_nav: navItem.accumulated_nav,
+        price,
+        premium,
+        index_change: totalIndexChange ?? singleIndexChange,
+        estimated_nav,
+        estimation_error: estimationError,
+      }
     })
 
-    return { code: codeInfo.code, name: null, index_name: firstIndex.index_name || '', coefficient: firstIndex.coefficient || 0.95, history, market: codeInfo.market, type: codeInfo.type, is_lof: true, data_sources: { nav: navSource, kline: klineSource } }
+    return {
+      code: codeInfo.code,
+      name: null,
+      index_name: config.indices[0]?.index_name || '',
+      coefficient: config.indices[0]?.coefficient || 0.95,
+      history,
+      market: codeInfo.market,
+      type: codeInfo.type,
+      is_lof: true,
+      data_sources: { nav: navSource, kline: klineSource },
+    }
   } catch (error) {
     return { code, error: String(error) }
   }
