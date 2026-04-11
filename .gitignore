@@ -42,3 +42,6 @@ build/
 # 操作系统临时文件
 *.tmp
 *.temp
+
+# OpenCode配置
+opencode.json
