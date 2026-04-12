@@ -909,19 +909,14 @@ async function getHistoryData(code: string, customConfig: Record<string, LOFConf
     }
 
     const config = getLOFConfig(codeInfo.code, customConfig)
-    console.log(`[历史] ${codeInfo.code}: config=${JSON.stringify(config)}`)
-    
     const { data: navHistory, source: navSource } = await getEMFundNavHistory(codeInfo.code, 35)
-    console.log(`[历史] ${codeInfo.code}: navHistory=${navHistory.length}, source=${navSource}`)
 
     // 获取所有指数的历史数据
     const indexHistories: Record<string, KlineItem[]> = {}
     for (const idx of config.indices) {
       if (!idx.is_manual && idx.index_code) {
         const indexCodeInfo = parseCode(idx.index_code)
-        console.log(`[历史] ${codeInfo.code}: 获取指数 ${idx.index_code} (${idx.index_name}), market=${indexCodeInfo.market}, type=${indexCodeInfo.type}`)
         const { data } = await getKline(indexCodeInfo, 35)
-        console.log(`[历史] ${codeInfo.code}: 指数 ${idx.index_code} 返回 ${data.length} 条`)
         indexHistories[idx.index_code] = data
       }
     }
