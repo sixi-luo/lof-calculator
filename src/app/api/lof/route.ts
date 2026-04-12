@@ -906,7 +906,9 @@ async function getHistoryData(code: string, customConfig: Record<string, LOFConf
     for (const idx of config.indices) {
       if (!idx.is_manual && idx.index_code) {
         const indexCodeInfo = parseCode(idx.index_code)
+        console.log(`[历史] ${codeInfo.code}: 指数=${idx.index_code}, type=${indexCodeInfo.type}, market=${indexCodeInfo.market}`)
         const { data } = await getKline(indexCodeInfo, 35)
+        console.log(`[历史] ${codeInfo.code}: 指数 ${idx.index_code} 返回 ${data.length} 条`)
         indexHistories[idx.index_code] = data
       }
     }
