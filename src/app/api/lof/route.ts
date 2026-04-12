@@ -643,12 +643,14 @@ async function getEMIndexQuote(indexCode: string, exchange: string): Promise<{ d
         
         if (result?.data) {
           const d = result.data
+          // f169 是涨跌幅百分比
+          const changePercent = d.f169 ? d.f169 / 100 : null
           return {
             data: {
               code: indexCode,
               name: d.f58 || '',
               price: d.f43 ? d.f43 / 100 : null,
-              change_percent: d.f60 ? d.f60 / 100 : null,
+              change_percent: changePercent,
               change: d.f43 && d.f57 ? (d.f43 - d.f57) / 100 : null,
             },
             source: '东财API'
