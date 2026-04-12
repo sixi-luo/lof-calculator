@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback, Fragment } from 'react'
+import { useState, useEffect, useCallback, useRef, Fragment } from 'react'
 import { dataCache } from '@/utils/cache'
 
 // 类型定义
@@ -110,6 +110,7 @@ export default function Home() {
   const [customConfigs, setCustomConfigs] = useState<Record<string, LOFConfig>>({})
   const [batchData, setBatchData] = useState<LOFBatchItem[]>([])
   const [historyData, setHistoryData] = useState<Record<string, LOFHistory>>({})
+  const historyDataRef = useRef<Record<string, LOFHistory>>({})
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [expandedCode, setExpandedCode] = useState<string | null>(null)
@@ -259,7 +260,7 @@ export default function Home() {
     // 纯数字判断
     if (/^\d+$/.test(trimmed)) {
       if (trimmed.length === 6) return trimmed // A股
-      if (trimmed.length === 4 || trimmed.length === 5) return trimmed.padStart(5, '0') + '.HK' // 港股
+      if (trimmed.length === 4 || trimmed.length === 5) return trimmed.padStart(4, '0') + '.HK' // 港股
     }
     // 纯字母，加.US后缀
     if (/^[A-Z]+$/i.test(trimmed)) return trimmed + '.US'
@@ -311,6 +312,7 @@ export default function Home() {
     setHistoryData(prev => {
       const newData = { ...prev }
       delete newData[code]
+      historyDataRef.current = newData
       return newData
     })
     dataCache.delete('batch', code)
@@ -411,11 +413,11 @@ export default function Home() {
       setCacheStats(dataCache.getStats())
       
       // 获取历史数据
-      const historyResults: Record<string, LOFHistory> = { ...historyData }
+      const historyResults: Record<string, LOFHistory> = { ...historyDataRef.current }
       
       for (const item of sortedResults) {
         // 检查是否已有历史数据（从之前的缓存或获取）
-        const existingHistory = historyData[item.code]
+        const existingHistory = historyDataRef.current[item.code]
         
         // 如果已有有效的历史数据，直接使用
         if (existingHistory && existingHistory.history && existingHistory.history.length > 0) {
@@ -445,6 +447,7 @@ export default function Home() {
       }
       
       setHistoryData(historyResults)
+      historyDataRef.current = historyResults
       setCacheStats(dataCache.getStats())
       
     } catch (err) {
@@ -456,12 +459,13 @@ export default function Home() {
       setLoading(false)
       setForceRefresh(false)
     }
-  }, [activeCodes, customConfigs, historyData])
+  }, [activeCodes, customConfigs])
 
   const clearAllCache = () => {
     dataCache.clear()
     setBatchData([])
     setHistoryData({})
+    historyDataRef.current = {}
     setCacheStats(dataCache.getStats())
     setLastUpdateTime(null)
   }

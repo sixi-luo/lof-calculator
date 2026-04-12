@@ -13,6 +13,8 @@ export const LOF_FUND_LIST: LOFFund[] = [
   // 消费
   { code: '161725', name: '招商白酒LOF', indexCode: '399997', indexName: '中证白酒', coefficient: 0.95, category: '消费' },
   { code: '161118', name: '消费LOF', indexCode: '000932', indexName: '中证主要消费', coefficient: 0.95, category: '消费' },
+  { code: '161119', name: '易基消费LOF', indexCode: '000932', indexName: '中证主要消费', coefficient: 0.95, category: '消费' },
+  { code: '160119', name: '综指LOF', indexCode: '000300', indexName: '沪深300', coefficient: 0.95, category: '宽基' },
   
   // 医药
   { code: '161035', name: '医药LOF', indexCode: '399989', indexName: '中证医疗', coefficient: 0.95, category: '医药' },
@@ -45,7 +47,13 @@ export const LOF_FUND_LIST: LOFFund[] = [
   
   // 海外
   { code: '161831', name: '恒生LOF', indexCode: 'HSI', indexName: '恒生指数', coefficient: 0.95, category: '海外' },
+  { code: '160125', name: '恒指LOF', indexCode: 'HSI', indexName: '恒生指数', coefficient: 0.95, category: '海外' },
+  { code: '160323', name: '纳指LOF', indexCode: 'HSI', indexName: '恒生指数', coefficient: 0.95, category: '海外' },
   { code: '161130', name: '纳指LOF', indexCode: 'NDX', indexName: '纳斯达克100', coefficient: 0.95, category: '海外' },
+  { code: '160140', name: '标普LOF', indexCode: 'GSPC', indexName: '标普500', coefficient: 0.95, category: '海外' },
+  { code: '160416', name: '标普LOF', indexCode: 'GSPC', indexName: '标普500', coefficient: 0.95, category: '海外' },
+  { code: '160723', name: '纳指LOF', indexCode: 'NDX', indexName: '纳斯达克100', coefficient: 0.95, category: '海外' },
+  { code: '160930', name: '标普LOF', indexCode: 'GSPC', indexName: '标普500', coefficient: 0.95, category: '海外' },
   
   // 宽基
   { code: '161811', name: '沪深300LOF', indexCode: '000300', indexName: '沪深300', coefficient: 0.95, category: '宽基' },

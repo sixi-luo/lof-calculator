@@ -938,7 +938,11 @@ async function getHistoryData(code: string, customConfig: Record<string, LOFConf
         indexChangesByDate[item.date][indexCode] = item.change_percent
       }
     }
-
+    
+    console.log(`[历史] indexChangesByDate keys: ${Object.keys(indexChangesByDate).join(',')}`)
+    const firstDateKey = Object.keys(indexChangesByDate)[0]
+    console.log(`[历史] 首日 ${firstDateKey} 的涨跌幅: ${JSON.stringify(indexChangesByDate[firstDateKey])}`)
+    
     const allDates = Object.keys(navByDate).sort().reverse()
     const historyDates = allDates.slice(0, 30)
 
