@@ -628,12 +628,21 @@ async function getEMIndexKline(indexCode: string, exchange: string, count: numbe
     async () => {
       try {
         const secid = exchange === 'SH' ? `1.${indexCode}` : `0.${indexCode}`
+        console.log(`[EM] 请求指数K线: secid=${secid}`)
         const url = `https://push2his.eastmoney.com/api/qt/stock/kline/get?secid=${secid}&fields1=f1,f2,f3,f4,f5,f6&fields2=f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61&klt=101&fqt=0&end=20500101&lmt=${count}`
         const response = await fetch(url, { headers: EM_HEADERS, signal: AbortSignal.timeout(15000) })
-        if (!response.ok) return { data: [], source: '东财API' }
+        console.log(`[EM] HTTP状态: ${response.status}`)
+        if (!response.ok) {
+          console.log(`[EM] 请求失败: HTTP ${response.status}`)
+          return { data: [], source: '东财API' }
+        }
         const result = await response.json()
+        console.log(`[EM] 返回结果: ${JSON.stringify(result).substring(0, 300)}`)
         
         if (result?.data?.klines && Array.isArray(result.data.klines)) {
+          console.log(`[EM] K线数据条数: ${result.data.klines.length}`)
+          console.log(`[EM] 首条数据: ${result.data.klines[0]}`)
+          
           const klines: KlineItem[] = result.data.klines.map((line: string) => {
             const parts = line.split(',')
             const date = parts[0]
@@ -642,6 +651,7 @@ async function getEMIndexKline(indexCode: string, exchange: string, count: numbe
             const high = parseFloat(parts[3])
             const low = parseFloat(parts[4])
             const changePercent = parts.length >= 11 ? parseFloat(parts[10]) : null
+            console.log(`[EM] 日期=${date}, 收盘=${close}, 涨跌幅=${changePercent}`)
             
             return {
               date,
@@ -654,12 +664,14 @@ async function getEMIndexKline(indexCode: string, exchange: string, count: numbe
           })
           return { data: klines, source: '东财API' }
         }
+        console.log(`[EM] 无K线数据`)
         return { data: [], source: '东财API' }
-      } catch {
+      } catch (error) {
+        console.log(`[EM] 错误: ${error}`)
         return { data: [], source: '东财API' }
       }
     },
-    { forceRefresh: false, keyParts: [indexCode, exchange, String(count)] }
+    { forceRefresh: true, keyParts: [indexCode, exchange, String(count)] }
   )
 }
 
