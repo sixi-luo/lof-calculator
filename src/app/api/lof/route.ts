@@ -685,8 +685,8 @@ async function getEMIndexKline(indexCode: string, exchange: string, count: numbe
             const close = parseFloat(parts[2])
             const high = parseFloat(parts[3])
             const low = parseFloat(parts[4])
-            // parts[7] 是涨跌幅百分比
-            const changePercent = parseFloat(parts[7]) || null
+            // parts[8] 是涨跌幅百分比(0.11是涨跌幅价格的另一种表示，0.55是涨跌幅百分比)
+            const changePercent = parseFloat(parts[8]) || null
             
             return {
               date,
