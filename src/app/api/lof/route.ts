@@ -776,6 +776,8 @@ async function getEMFundNavHistory(fundCode: string, count: number = 30): Promis
 const DEFAULT_LOF_CONFIG: Record<string, LOFConfig> = {
   '161725': { indices: [{ index_code: '399997', index_name: '中证白酒', coefficient: 0.95 }] },
   '161118': { indices: [{ index_code: '000932', index_name: '中证主要消费', coefficient: 0.95 }] },
+  '161119': { indices: [{ index_code: '000932', index_name: '中证主要消费', coefficient: 0.95 }] },
+  '160119': { indices: [{ index_code: '000300', index_name: '沪深300', coefficient: 0.95 }] },
   '161035': { indices: [{ index_code: '399989', index_name: '中证医疗', coefficient: 0.95 }] },
   '161122': { indices: [{ index_code: '399989', index_name: '中证医疗', coefficient: 0.95 }] },
   '161028': { indices: [{ index_code: '399808', index_name: '中证新能源', coefficient: 0.95 }] },
