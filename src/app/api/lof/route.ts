@@ -644,17 +644,15 @@ async function getEMIndexQuote(indexCode: string, exchange: string): Promise<{ d
         
         if (result?.data) {
           const d = result.data
-          // f60 是涨跌幅(需要除以10000)，f169 是涨跌幅百分比(直接是百分比值)
-          // 但看起来f60=773855表示7.73855%，f169=815表示8.15%
-          // 实际应该用f169但不需要除以100
-          const changePercent = d.f169 || null
+          // f169=815 实际上表示 8.15%，需要除以100
+          const changePercent = d.f169 ? d.f169 / 100 : null
           return {
             data: {
               code: indexCode,
               name: d.f58 || '',
               price: d.f43 ? d.f43 / 100 : null,
               change_percent: changePercent,
-              change: d.f43 && d.f57 ? (d.f43 - d.f57) / 100 : null,
+              change: null,
             },
             source: '东财API'
           }
