@@ -678,9 +678,6 @@ async function getEMIndexKline(indexCode: string, exchange: string, count: numbe
         const result = await response.json()
         
         if (result?.data?.klines && Array.isArray(result.data.klines)) {
-          // 调试：打印第一条数据的所有字段
-          console.log(`[EM指数K线] ${indexCode}: 首条数据=${result.data.klines[0]}, 字段数=${result.data.klines[0].split(',').length}`)
-          
           const klines: KlineItem[] = result.data.klines.map((line: string) => {
             const parts = line.split(',')
             const date = parts[0]
@@ -688,8 +685,8 @@ async function getEMIndexKline(indexCode: string, exchange: string, count: numbe
             const close = parseFloat(parts[2])
             const high = parseFloat(parts[3])
             const low = parseFloat(parts[4])
-            // change_percent 在第11个位置（索引10）
-            const changePercent = parts.length >= 11 ? parseFloat(parts[10]) : null
+            // parts[7] 是涨跌幅百分比
+            const changePercent = parseFloat(parts[7]) || null
             
             return {
               date,
