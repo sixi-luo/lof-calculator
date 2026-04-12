@@ -541,14 +541,14 @@ async function getQuote(codeInfo: CodeInfo): Promise<{ data: StockQuote | null; 
     return { data: data.data, source: data.source }
   }
   
-  // 港股/美股指数：优先Yahoo Finance，失败则尝试TickFlow
-  if (codeInfo.type === 'index' && (codeInfo.market === 'HK' || codeInfo.market === 'US')) {
-    const yahooSymbol = codeInfo.formatted.yahoo || codeInfo.code
-    const yahooData = await getYahooQuote(yahooSymbol)
-    if (yahooData.data?.price !== null && yahooData.data?.price !== undefined) {
-      return yahooData
+  // 港股/美股指数或股票：优先Yahoo Finance，失败则尝试TickFlow
+  if (codeInfo.market === 'HK' || codeInfo.market === 'US') {
+    if (codeInfo.formatted.yahoo) {
+      const yahooData = await getYahooQuote(codeInfo.formatted.yahoo)
+      if (yahooData.data?.price !== null && yahooData.data?.price !== undefined) {
+        return yahooData
+      }
     }
-    // Yahoo失败，尝试TickFlow（如果有tickflow格式）
     if (codeInfo.formatted.tickflow) {
       const tickflowData = await getTickflowQuote(codeInfo.formatted.tickflow, codeInfo)
       if (tickflowData.data?.price !== null && tickflowData.data?.price !== undefined) {
@@ -558,7 +558,15 @@ async function getQuote(codeInfo: CodeInfo): Promise<{ data: StockQuote | null; 
     return { data: null, source: 'none' }
   }
   
-  // A股/港股/美股：优先Yahoo Finance，失败则TickFlow
+  // A股指数：优先东方财富API
+  if (codeInfo.type === 'index' && codeInfo.market === 'A' && codeInfo.exchange) {
+    const emData = await getEMIndexQuote(codeInfo.code, codeInfo.exchange)
+    if (emData.data?.price !== null && emData.data?.price !== undefined) {
+      return emData
+    }
+  }
+  
+  // A股：优先Yahoo Finance，失败则TickFlow
   if (codeInfo.formatted.yahoo) {
     const yahooData = await getYahooQuote(codeInfo.formatted.yahoo)
     if (yahooData.data?.price !== null && yahooData.data?.price !== undefined) {
@@ -577,14 +585,14 @@ async function getQuote(codeInfo: CodeInfo): Promise<{ data: StockQuote | null; 
 async function getKline(codeInfo: CodeInfo, count: number = 30): Promise<{ data: KlineItem[]; source: string }> {
   if (codeInfo.type === 'lof') return getSinaLOFKline(codeInfo.code, count)
   
-  // 港股/美股指数：优先Yahoo Finance，失败则尝试TickFlow
-  if (codeInfo.type === 'index' && (codeInfo.market === 'HK' || codeInfo.market === 'US')) {
-    const yahooSymbol = codeInfo.formatted.yahoo || codeInfo.code
-    const yahooData = await getYahooKline(yahooSymbol, count)
-    if (yahooData.data.length > 0 && yahooData.data.some(item => item.close !== null)) {
-      return yahooData
+  // 港股/美股指数或股票：优先Yahoo Finance
+  if (codeInfo.market === 'HK' || codeInfo.market === 'US') {
+    if (codeInfo.formatted.yahoo) {
+      const yahooData = await getYahooKline(codeInfo.formatted.yahoo, count)
+      if (yahooData.data.length > 0 && yahooData.data.some(item => item.close !== null)) {
+        return yahooData
+      }
     }
-    // Yahoo失败，尝试TickFlow（如果有tickflow格式）
     if (codeInfo.formatted.tickflow) {
       const tickflowData = await getTickflowKline(codeInfo.formatted.tickflow, count)
       if (tickflowData.data.length > 0 && tickflowData.data.some(item => item.close !== null)) {
@@ -594,7 +602,15 @@ async function getKline(codeInfo: CodeInfo, count: number = 30): Promise<{ data:
     return { data: [], source: 'none' }
   }
   
-  // A股/港股/美股：优先Yahoo Finance，失败则TickFlow
+  // A股指数：优先东方财富API
+  if (codeInfo.type === 'index' && codeInfo.market === 'A' && codeInfo.exchange) {
+    const emData = await getEMIndexKline(codeInfo.code, codeInfo.exchange, count)
+    if (emData.data.length > 0) {
+      return emData
+    }
+  }
+  
+  // A股股票：优先Yahoo Finance
   if (codeInfo.formatted.yahoo) {
     const yahooData = await getYahooKline(codeInfo.formatted.yahoo, count)
     if (yahooData.data.length > 0 && yahooData.data.some(item => item.close !== null)) {
@@ -605,14 +621,6 @@ async function getKline(codeInfo: CodeInfo, count: number = 30): Promise<{ data:
     const tickflowData = await getTickflowKline(codeInfo.formatted.tickflow, count)
     if (tickflowData.data.length > 0 && tickflowData.data.some(item => item.close !== null)) {
       return tickflowData
-    }
-  }
-  
-  // A股指数回退：尝试东方财富API
-  if (codeInfo.type === 'index' && codeInfo.market === 'A' && codeInfo.exchange) {
-    const emData = await getEMIndexKline(codeInfo.code, codeInfo.exchange, count)
-    if (emData.data.length > 0) {
-      return emData
     }
   }
   
