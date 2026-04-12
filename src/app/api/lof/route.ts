@@ -628,6 +628,42 @@ async function getKline(codeInfo: CodeInfo, count: number = 30): Promise<{ data:
 }
 
 // ============================================================
+// 东方财富指数实时行情
+// ============================================================
+async function getEMIndexQuote(indexCode: string, exchange: string): Promise<{ data: StockQuote | null; source: string }> {
+  return serverCache.getOrFetch(
+    'em_index_quote',
+    async () => {
+      try {
+        const secid = exchange === 'SH' ? `1.${indexCode}` : `0.${indexCode}`
+        const url = `https://push2.eastmoney.com/api/qt/stock/get?secid=${secid}&fields=f43,f57,f58,f60,f169`
+        const response = await fetch(url, { headers: EM_HEADERS, signal: AbortSignal.timeout(15000) })
+        if (!response.ok) return { data: null, source: '东财API' }
+        const result = await response.json()
+        
+        if (result?.data) {
+          const d = result.data
+          return {
+            data: {
+              code: indexCode,
+              name: d.f58 || '',
+              price: d.f43 ? d.f43 / 100 : null,
+              change_percent: d.f60 ? d.f60 / 100 : null,
+              change: d.f43 && d.f57 ? (d.f43 - d.f57) / 100 : null,
+            },
+            source: '东财API'
+          }
+        }
+        return { data: null, source: '东财API' }
+      } catch {
+        return { data: null, source: '东财API' }
+      }
+    },
+    { forceRefresh: false, keyParts: [indexCode, exchange] }
+  )
+}
+
+// ============================================================
 // 东方财富指数K线获取
 // ============================================================
 async function getEMIndexKline(indexCode: string, exchange: string, count: number = 30): Promise<{ data: KlineItem[]; source: string }> {
