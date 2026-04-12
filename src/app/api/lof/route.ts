@@ -636,6 +636,7 @@ async function getEMIndexQuote(indexCode: string, exchange: string): Promise<{ d
     async () => {
       try {
         const secid = exchange === 'SH' ? `1.${indexCode}` : `0.${indexCode}`
+        // 使用实时行情API
         const url = `https://push2.eastmoney.com/api/qt/stock/get?secid=${secid}&fields=f43,f57,f58,f60,f169`
         const response = await fetch(url, { headers: EM_HEADERS, signal: AbortSignal.timeout(15000) })
         if (!response.ok) return { data: null, source: '东财API' }
@@ -643,8 +644,10 @@ async function getEMIndexQuote(indexCode: string, exchange: string): Promise<{ d
         
         if (result?.data) {
           const d = result.data
-          // f169 是涨跌幅百分比
-          const changePercent = d.f169 ? d.f169 / 100 : null
+          // f60 是涨跌幅(需要除以10000)，f169 是涨跌幅百分比(直接是百分比值)
+          // 但看起来f60=773855表示7.73855%，f169=815表示8.15%
+          // 实际应该用f169但不需要除以100
+          const changePercent = d.f169 || null
           return {
             data: {
               code: indexCode,
@@ -661,7 +664,7 @@ async function getEMIndexQuote(indexCode: string, exchange: string): Promise<{ d
         return { data: null, source: '东财API' }
       }
     },
-    { forceRefresh: false, keyParts: [indexCode, exchange] }
+    { forceRefresh: true, keyParts: [indexCode, exchange] }  // 强制刷新获取最新数据
   )
 }
 
