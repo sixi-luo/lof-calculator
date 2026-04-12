@@ -635,26 +635,44 @@ async function getEMIndexKline(indexCode: string, exchange: string, count: numbe
     if (result?.data?.klines && Array.isArray(result.data.klines)) {
       console.log(`[EM指数K线] ${indexCode}: 首条=${result.data.klines[0]}`)
       
+      // ============================================================
+// 东方财富指数K线获取
+// ============================================================
+async function getEMIndexKline (indexCode: string, exchange: string, count: number = 30): Promise<{ data: KlineItem[]; source: string }> {
+  try {
+    const secid = exchange === 'SH' ? `1.${indexCode}` : `0.${indexCode}`
+    const url = `https://push2his.eastmoney.com/api/qt/stock/kline/get?secid=${secid}&fields1=f1,f2,f3,f4,f5,f6&fields2=f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61&klt=101&fqt=0&end=20500101&lmt=${count}`
+    const response = await fetch(url, { headers: EM_HEADERS, signal: AbortSignal.timeout(15000) })
+    if (!response.ok) {
+      return { data: [], source: '东财API' }
+    }
+    const result = await response.json()
+    console.log(`[EM指数K线] ${indexCode}: result=${JSON.stringify(result).substring(0, 200)}`)
+
+    if (result?.data?.klines && Array.isArray(result.data.klines)) {
+      console.log(`[EM指数K线] ${indexCode}: 首条=${result.data.klines[0]}`)
+
       const klines: KlineItem[] = result.data.klines.map((line: string) => {
         const parts = line.split(',')
         const date = parts[0]
-            const open = parseFloat(parts[1])
-            const close = parseFloat(parts[2])
-            const high = parseFloat(parts[3])
-            const low = parseFloat(parts[4])
-            // parts[8] 是涨跌幅百分比
-            const changePercent = parts.length >= 11 ? parseFloat(parts[10]) : null
-            
-            return {
-              date,
-              open: isNaN(open) ? null : open,
-              close: isNaN(close) ? null : close,
-              high: isNaN(high) ? null : high,
-              low: isNaN(low) ? null : low,
-change_percent: isNaN(changePercent!) ? null : changePercent,
-      }
-    })
-    return { data: klines, source: '东财API' }
+        const open = parseFloat(parts[1])
+        const close = parseFloat(parts[2])
+        const high = parseFloat(parts[3])
+        const low = parseFloat(parts[4])
+        const changePercent = parts.length >= 11 ? parseFloat(parts[10]) : null
+
+        return {
+          date,
+          open: isNaN(open) ? null : open,
+          close: isNaN(close) ? null : close,
+          high: isNaN(high) ? null : high,
+          low: isNaN(low) ? null : low,
+          change_percent: isNaN(changePercent!) ? null : changePercent,
+        }
+      })
+      return { data: klines, source: '东财API' }
+    }
+    return { data: [], source: '东财API' }
   } catch (error) {
     console.log(`[EM指数K线] ${indexCode}: 错误=${error}`)
     return { data: [], source: '东财API' }
