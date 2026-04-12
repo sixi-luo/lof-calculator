@@ -642,7 +642,7 @@ async function getEMIndexKline(indexCode: string, exchange: string, count: numbe
             const high = parseFloat(parts[3])
             const low = parseFloat(parts[4])
             // parts[8] 是涨跌幅百分比
-            const changePercent = parts.length >= 9 ? parseFloat(parts[8]) : null
+            const changePercent = parts.length >= 11 ? parseFloat(parts[10]) : null
             
             return {
               date,
