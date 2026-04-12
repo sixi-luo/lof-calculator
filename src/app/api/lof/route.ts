@@ -989,7 +989,7 @@ async function getHistoryData(code: string, customConfig: Record<string, LOFConf
         price,
         premium,
         index_change: totalIndexChange ?? singleIndexChange,
-        estimated_nav,
+        estimated_nav: estimatedNav,
         estimation_error: estimationError,
       }
     })
