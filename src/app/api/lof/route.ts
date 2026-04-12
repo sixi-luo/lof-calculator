@@ -629,21 +629,11 @@ async function getEMIndexKline(indexCode: string, exchange: string, count: numbe
       try {
         const secid = exchange === 'SH' ? `1.${indexCode}` : `0.${indexCode}`
         const url = `https://push2his.eastmoney.com/api/qt/stock/kline/get?secid=${secid}&fields1=f1,f2,f3,f4,f5,f6&fields2=f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61&klt=101&fqt=0&end=20500101&lmt=${count}`
-        console.log(`[EM指数K线] ${indexCode} (${exchange}): 请求URL`)
         const response = await fetch(url, { headers: EM_HEADERS, signal: AbortSignal.timeout(15000) })
-        if (!response.ok) {
-          console.log(`[EM指数K线] ${indexCode}: HTTP ${response.status}`)
-          return { data: [], source: '东财API' }
-        }
+        if (!response.ok) return { data: [], source: '东财API' }
         const result = await response.json()
-        console.log(`[EM指数K线] ${indexCode}: result.data=${!!result.data}, klines=${result?.data?.klines?.length}`)
         
         if (result?.data?.klines && Array.isArray(result.data.klines)) {
-          // 打印第一条数据示例
-          if (result.data.klines.length > 0) {
-            console.log(`[EM指数K线] ${indexCode}: 首条数据=${result.data.klines[0]}`)
-          }
-          
           const klines: KlineItem[] = result.data.klines.map((line: string) => {
             const parts = line.split(',')
             const date = parts[0]
