@@ -131,6 +131,7 @@ export default function App() {
   const [newFundCode, setNewFundCode] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
+  const [refreshing, setRefreshing] = useState(false)
 
   useEffect(() => {
     const saved = loadFromStorage()
@@ -152,6 +153,15 @@ export default function App() {
       })
     }
   }, [])
+
+  const refreshAll = () => {
+    setRefreshing(true)
+    setFunds(current => {
+      current.forEach(f => refreshFundData(f.code))
+      return current
+    })
+    setTimeout(() => setRefreshing(false), 2000)
+  }
 
   const addFund = async () => {
     if (!newFundCode.trim()) return
@@ -263,8 +273,8 @@ export default function App() {
             {loading ? '加载中...' : '添加基金'}
           </button>
           {funds.length > 0 && (
-            <button className="btn btn-secondary" onClick={() => funds.forEach(f => refreshFundData(f.code))}>
-              刷新全部
+            <button className="btn btn-secondary" onClick={refreshAll} disabled={refreshing}>
+              {refreshing ? '刷新中...' : '刷新全部'}
             </button>
           )}
         </div>
@@ -477,22 +487,22 @@ function FundCard({ fund, onRemove, onUpdateTracking, onAddTracking, onRemoveTra
         )}
       </div>
 
-      <button 
-        className="btn btn-secondary" 
-        style={{ width: 'calc(50% - 6px)', marginBottom: '12px' }}
-        onClick={() => onRefresh()}
-        disabled={trackingLoading}
-      >
-        刷新数据
-      </button>
-      <button 
-        className="btn btn-secondary" 
-        style={{ width: 'calc(50% - 6px)', marginBottom: '12px' }}
-        onClick={handleRefresh}
-        disabled={trackingLoading}
-      >
-        {trackingLoading ? '保存中...' : '保存'}
-      </button>
+      <div style={{ display: 'flex', gap: '12px', marginBottom: '12px' }}>
+        <button 
+          className="btn btn-secondary" 
+          style={{ flex: 1 }}
+          onClick={onRefresh}
+        >
+          刷新数据
+        </button>
+        <button 
+          className="btn btn-secondary" 
+          style={{ flex: 1 }}
+          onClick={handleRefresh}
+        >
+          保存
+        </button>
+      </div>
 
       <div className="history-section">
         <button className="history-toggle" onClick={() => { 
