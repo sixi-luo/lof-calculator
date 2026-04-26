@@ -262,6 +262,11 @@ export default function App() {
           <button className="btn btn-primary" onClick={addFund} disabled={loading}>
             {loading ? '加载中...' : '添加基金'}
           </button>
+          {funds.length > 0 && (
+            <button className="btn btn-secondary" onClick={() => funds.forEach(f => refreshFundData(f.code))}>
+              刷新全部
+            </button>
+          )}
         </div>
       </div>
 
@@ -474,11 +479,19 @@ function FundCard({ fund, onRemove, onUpdateTracking, onAddTracking, onRemoveTra
 
       <button 
         className="btn btn-secondary" 
-        style={{ width: '100%', marginBottom: '12px' }}
+        style={{ width: 'calc(50% - 6px)', marginBottom: '12px' }}
+        onClick={() => onRefresh()}
+        disabled={trackingLoading}
+      >
+        刷新数据
+      </button>
+      <button 
+        className="btn btn-secondary" 
+        style={{ width: 'calc(50% - 6px)', marginBottom: '12px' }}
         onClick={handleRefresh}
         disabled={trackingLoading}
       >
-        {trackingLoading ? '刷新中...' : '刷新数据并保存'}
+        {trackingLoading ? '保存中...' : '保存'}
       </button>
 
       <div className="history-section">
