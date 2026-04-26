@@ -1,0 +1,543 @@
+import { useState, useEffect, useCallback } from 'react'
+
+const STORAGE_KEY = 'lof_funds_data'
+const HISTORY_KEY = 'lof_history'
+
+const MARKET_CONFIG = {
+  A: { codePrefix: /^[0-5]/, name: 'A股', sinaPrefix: 'sh' },
+  HK: { codePrefix: /^[0-5]/, name: '港股', sinaPrefix: 'hk' },
+  US: { codePrefix: /^[0-5]/, name: '美股', sinaPrefix: 'gb_' }
+}
+
+function detectMarket(code) {
+  const cleanCode = code.replace(/[\s\-]/g, '')
+  if (/^(00|60)\d{4}/.test(cleanCode)) return 'sh'
+  if (/^(30|68)\d{4}/.test(cleanCode)) return 'sz'
+  if (/^8[0-5]\d{5}/.test(cleanCode)) return 'bj'
+  if (/^\d{4,5}/.test(cleanCode) && /^[0-9]/.test(cleanCode)) return 'hk'
+  if (/^[a-zA-Z]/.test(cleanCode)) return 'us'
+  return null
+}
+
+const MARKET_PREFIXES = {
+  sh: 'sh', sz: 'sz', bj: 'bj', hk: 'hk', us: 'gb_'
+}
+
+async function fetchSinaData(code, market) {
+  const prefix = MARKET_PREFIXES[market] || 'gb_'
+  const symbol = prefix + code
+  
+  const urls = [
+    `https://hq.sinajisu.cn/index.php?symbol=${symbol}&type=detail`,
+    `https://stock.finance.sina.com.cn/fundamentals/api/openapi.php/StockService.getStockInfo?symbol=${symbol}`,
+    `https://api.doctorxiong.club/v1/stock?token=demo&code=${market === 'us' ? code : symbol}`
+  ]
+  
+  for (const url of urls) {
+    try {
+      const response = await fetch(url)
+      if (!response.ok) continue
+      const text = await response.text()
+      const data = parseSinaResponse(text, market)
+      if (data && data.price > 0) return data
+    } catch (e) {
+      continue
+    }
+  }
+  return null
+}
+
+function parseSinaResponse(text, market) {
+  try {
+    if (market === 'us') {
+      const match = text.match(/="([^"]+)"/)
+      if (match) {
+        const data = match[1].split(',')
+        if (data.length >= 10) {
+          return {
+            name: data[0],
+            price: parseFloat(data[1]),
+            change: parseFloat(data[2]),
+            changePercent: parseFloat(data[3]),
+            open: parseFloat(data[6]),
+            high: parseFloat(data[7]),
+            low: parseFloat(data[8]),
+            close: parseFloat(data[9])
+          }
+        }
+      }
+    }
+    
+    const match = text.match(/="([^"]+)"/)
+    if (!match) {
+      try {
+        const json = JSON.parse(text)
+        if (json.data) {
+          const d = json.data
+          return {
+            name: d.name || d.stock_name || code,
+            price: parseFloat(d.price || d.current || 0),
+            change: parseFloat(d.pricechange || d.chg || 0),
+            changePercent: parseFloat(d.percent || d.pct_chg || 0),
+            open: parseFloat(d.open || 0),
+            high: parseFloat(d.high || 0),
+            low: parseFloat(d.low || 0),
+            close: parseFloat(d.close || d.prev_close || 0)
+          }
+        }
+      } catch {}
+      return null
+    }
+    
+    const data = match[1].split(',')
+    if (data.length < 10) return null
+    
+    return {
+      name: data[0],
+      price: parseFloat(data[1]),
+      change: parseFloat(data[2]),
+      changePercent: parseFloat(data[3]),
+      volume: parseInt(data[4]),
+      amount: parseFloat(data[5]),
+      open: parseFloat(data[6]),
+      high: parseFloat(data[7]),
+      low: parseFloat(data[8]),
+      close: parseFloat(data[9])
+    }
+  } catch (e) {
+    return null
+  }
+}
+
+async function fetchFundData(code) {
+  const markets = ['sh', 'sz', 'bj', 'hk', 'us']
+  const market = detectMarket(code)
+  
+  const tryMarket = async (m) => {
+    try {
+      const response = await fetch(`/api/quote?code=${code}&market=${m}`)
+      if (response.ok) {
+        const data = await response.json()
+        if (data.price > 0) return data
+      }
+    } catch {}
+    return null
+  }
+  
+  if (market) {
+    const result = await tryMarket(market)
+    if (result) return result
+  }
+  
+  for (const m of markets) {
+    const result = await tryMarket(m)
+    if (result) return result
+  }
+  
+  return null
+}
+
+function formatNumber(num, decimals = 2) {
+  if (num == null || isNaN(num)) return '-'
+  return num.toFixed(decimals)
+}
+
+function formatPercent(num) {
+  if (num == null || isNaN(num)) return '-'
+  return (num >= 0 ? '+' : '') + num.toFixed(2) + '%'
+}
+
+function saveToStorage(data) {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(data))
+}
+
+function loadFromStorage() {
+  try {
+    const data = localStorage.getItem(STORAGE_KEY)
+    return data ? JSON.parse(data) : []
+  } catch {
+    return []
+  }
+}
+
+function saveHistory(fundCode, dailyData) {
+  try {
+    const history = JSON.parse(localStorage.getItem(HISTORY_KEY) || '{}')
+    if (!history[fundCode]) history[fundCode] = []
+    
+    const today = new Date().toISOString().split('T')[0]
+    const existing = history[fundCode].findIndex(d => d.date === today)
+    if (existing >= 0) {
+      history[fundCode][existing] = { ...history[fundCode][existing], ...dailyData }
+    } else {
+      history[fundCode].unshift({ date: today, ...dailyData })
+    }
+    
+    history[fundCode] = history[fundCode].slice(0, 30)
+    
+    localStorage.setItem(HISTORY_KEY, JSON.stringify(history))
+  } catch (e) {
+    console.error('Save history error:', e)
+  }
+}
+
+function getHistory(fundCode) {
+  try {
+    const history = JSON.parse(localStorage.getItem(HISTORY_KEY) || '{}')
+    return history[fundCode] || []
+  } catch {
+    return []
+  }
+}
+
+export default function App() {
+  const [funds, setFunds] = useState([])
+  const [newFundCode, setNewFundCode] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState(null)
+
+  useEffect(() => {
+    const saved = loadFromStorage()
+    if (saved.length > 0) {
+      setFunds(saved)
+      saved.forEach(f => refreshFundData(f.code))
+    }
+  }, [])
+
+  const refreshFundData = useCallback(async (code) => {
+    const data = await fetchFundData(code)
+    if (data) {
+      setFunds(prev => {
+        const updated = prev.map(f => 
+          f.code === code ? { ...f, ...data, lastUpdate: Date.now() } : f
+        )
+        saveToStorage(updated)
+        return updated
+      })
+    }
+  }, [])
+
+  const addFund = async () => {
+    if (!newFundCode.trim()) return
+    
+    setLoading(true)
+    setError(null)
+    
+    try {
+      const data = await fetchFundData(newFundCode.trim())
+      if (!data) {
+        setError('无法获取数据，请检查基金代码是否正确')
+        return
+      }
+      
+      const newFund = {
+        id: Date.now(),
+        code: newFundCode.trim(),
+        name: data.name || newFundCode.trim(),
+        market: data.market,
+        trackings: [{ id: 1, code: '', weight: 100 }],
+        price: data.price,
+        change: data.change,
+        changePercent: data.changePercent,
+        lastUpdate: Date.now()
+      }
+      
+      setFunds(prev => {
+        const updated = [...prev, newFund]
+        saveToStorage(updated)
+        return updated
+      })
+      
+      setNewFundCode('')
+    } catch (e) {
+      setError('添加失败: ' + e.message)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const removeFund = (id) => {
+    setFunds(prev => {
+      const updated = prev.filter(f => f.id !== id)
+      saveToStorage(updated)
+      return updated
+    })
+  }
+
+  const updateTracking = (fundId, trackingId, field, value) => {
+    setFunds(prev => {
+      const updated = prev.map(f => {
+        if (f.id !== fundId) return f
+        return {
+          ...f,
+          trackings: f.trackings.map(t => 
+            t.id === trackingId ? { ...t, [field]: value } : t
+          )
+        }
+      })
+      saveToStorage(updated)
+      return updated
+    })
+  }
+
+  const addTracking = (fundId) => {
+    setFunds(prev => {
+      const updated = prev.map(f => {
+        if (f.id !== fundId) return f
+        const newTracking = { id: Date.now(), code: '', weight: 0 }
+        return { ...f, trackings: [...f.trackings, newTracking] }
+      })
+      saveToStorage(updated)
+      return updated
+    })
+  }
+
+  const removeTracking = (fundId, trackingId) => {
+    setFunds(prev => {
+      const updated = prev.map(f => {
+        if (f.id !== fundId) return f
+        return { ...f, trackings: f.trackings.filter(t => t.id !== trackingId) }
+      })
+      saveToStorage(updated)
+      return updated
+    })
+  }
+
+  return (
+    <div className="container">
+      <header>
+        <h1>LOF基金净值计算器</h1>
+        <p>输入LOF基金代码，自动计算估算净值与折溢价率</p>
+      </header>
+
+      <div className="add-fund-section">
+        <div className="add-fund-form">
+          <div className="form-group">
+            <label>LOF基金代码</label>
+            <input
+              type="text"
+              value={newFundCode}
+              onChange={e => setNewFundCode(e.target.value)}
+              placeholder="如: 501018、161725、513500"
+              onKeyDown={e => e.key === 'Enter' && addFund()}
+            />
+          </div>
+          <button className="btn btn-primary" onClick={addFund} disabled={loading}>
+            {loading ? '加载中...' : '添加基金'}
+          </button>
+        </div>
+      </div>
+
+      {error && <div className="error">{error}</div>}
+
+      {funds.length === 0 ? (
+        <div className="empty-state">
+          <svg viewBox="0 0 24 24" fill="currentColor">
+            <path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-7 14h-2v-4H6v-2h4V7h2v4h4v2h-4v4z"/>
+          </svg>
+          <h3>暂无基金</h3>
+          <p>在上方输入LOF基金代码开始添加</p>
+        </div>
+      ) : (
+        <div className="fund-cards">
+          {funds.map(fund => (
+            <FundCard
+              key={fund.id}
+              fund={fund}
+              onRemove={() => removeFund(fund.id)}
+              onUpdateTracking={updateTracking}
+              onAddTracking={addTracking}
+              onRemoveTracking={removeTracking}
+              onRefresh={() => refreshFundData(fund.code)}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function FundCard({ fund, onRemove, onUpdateTracking, onAddTracking, onRemoveTracking, onRefresh }) {
+  const [trackingData, setTrackingData] = useState({})
+  const [showHistory, setShowHistory] = useState(false)
+  const [history, setHistory] = useState([])
+  
+  const marketLabels = {
+    sh: { label: '上证', class: 'market-a' },
+    sz: { label: '深证', class: 'market-a' },
+    bj: { label: '北交', class: 'market-a' },
+    hk: { label: '港股', class: 'market-hk' },
+    us: { label: '美股', class: 'market-us' }
+  }
+  
+  useEffect(() => {
+    loadTrackingData()
+  }, [fund.trackings])
+  
+  useEffect(() => {
+    if (showHistory) {
+      setHistory(getHistory(fund.code))
+    }
+  }, [showHistory, fund.code])
+
+  const loadTrackingData = async () => {
+    const data = {}
+    for (const t of fund.trackings) {
+      if (t.code && t.weight > 0) {
+        const result = await fetchFundData(t.code)
+        if (result) data[t.id] = result
+      }
+    }
+    setTrackingData(data)
+  }
+
+  const validTrackings = fund.trackings.filter(t => t.code && t.weight > 0)
+  const totalWeight = validTrackings.reduce((sum, t) => sum + t.weight, 0)
+  
+  let estimatedNav = null
+  if (validTrackings.length > 0 && totalWeight === 100 && fund.price) {
+    let weightedChange = 0
+    for (const t of validTrackings) {
+      const td = trackingData[t.id]
+      if (td && td.changePercent != null) {
+        weightedChange += td.changePercent * (t.weight / 100)
+      }
+    }
+    estimatedNav = fund.price / (1 + weightedChange / 100)
+  }
+  
+  const premiumRate = estimatedNav ? ((fund.price - estimatedNav) / estimatedNav * 100) : null
+  
+  const saveCurrentData = () => {
+    if (fund.price && estimatedNav) {
+      saveHistory(fund.code, {
+        price: fund.price,
+        change: fund.change,
+        changePercent: fund.changePercent,
+        estimatedNav,
+        premiumRate,
+        errorRate: fund.changePercent != null ? Math.abs(fund.changePercent - premiumRate) : null
+      })
+    }
+  }
+
+  return (
+    <div className="fund-card">
+      <div className="fund-card-header">
+        <div>
+          <h3>{fund.name || fund.code}</h3>
+          <span style={{ fontSize: '12px', color: '#666' }}>代码: {fund.code}</span>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <span className={`market-tag ${marketLabels[fund.market]?.class || 'market-a'}`}>
+            {marketLabels[fund.market]?.label || '未知'}
+          </span>
+          <button className="close-btn" onClick={onRemove}>×</button>
+        </div>
+      </div>
+
+      <div className="price-info">
+        <div className="price-item">
+          <div className="label">市场价格 <span style={{fontSize:'10px',color:'#999'}}>{fund.source}</span></div>
+          <div className="value">{formatNumber(fund.price)}</div>
+          {fund.changePercent != null && (
+            <div className={`change ${fund.change >= 0 ? 'up' : 'down'}`}>
+              {formatNumber(fund.change)} ({formatPercent(fund.changePercent)})
+            </div>
+          )}
+        </div>
+        <div className="price-item">
+          <div className="label">估算净值</div>
+          <div className="value">{estimatedNav ? formatNumber(estimatedNav) : '-'}</div>
+          {estimatedNav && premiumRate != null && (
+            <div className={`change ${premiumRate >= 0 ? 'up' : 'down'}`}>
+              折溢价: {formatPercent(premiumRate)}
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div className="tracking-config">
+        <h4>追踪配置（权重总和: {totalWeight}%）</h4>
+        <div className="tracking-items">
+          {fund.trackings.map(t => (
+            <div key={t.id} className="tracking-item">
+              <input
+                type="text"
+                placeholder="标的代码"
+                value={t.code}
+                onChange={e => onUpdateTracking(fund.id, t.id, 'code', e.target.value)}
+              />
+              <input
+                type="number"
+                className="percent"
+                placeholder="权重%"
+                min="0"
+                max="100"
+                value={t.weight || ''}
+                onChange={e => onUpdateTracking(fund.id, t.id, 'weight', parseInt(e.target.value) || 0)}
+              />
+              <div style={{ fontSize: '12px', color: '#666', textAlign: 'center' }}>
+                {trackingData[t.id] ? `¥${formatNumber(trackingData[t.id].price)}` : '-'}
+              </div>
+              <button className="remove-btn" onClick={() => onRemoveTracking(fund.id, t.id)}>×</button>
+            </div>
+          ))}
+        </div>
+        {fund.trackings.length < 2 && (
+          <button className="add-tracking-btn" onClick={() => onAddTracking(fund.id)}>
+            + 添加追踪标的
+          </button>
+        )}
+      </div>
+
+      <button 
+        className="btn btn-secondary" 
+        style={{ width: '100%', marginBottom: '12px' }}
+        onClick={() => { loadTrackingData(); saveCurrentData(); }}
+      >
+        刷新数据并存
+      </button>
+
+      <div className="history-section">
+        <button className="history-toggle" onClick={() => setShowHistory(!showHistory)}>
+          <span className={`arrow ${showHistory ? 'expanded' : ''}`}>▶</span>
+          近30天历史
+        </button>
+        
+        {showHistory && (
+          <div className="history-table">
+            {history.length === 0 ? (
+              <p style={{ textAlign: 'center', color: '#999', padding: '20px' }}>暂无历史数据</p>
+            ) : (
+              <table>
+                <thead>
+                  <tr>
+                    <th>日期</th>
+                    <th>价格</th>
+                    <th>估算净值</th>
+                    <th>折溢价率</th>
+                    <th>估算误差</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {history.map((h, i) => (
+                    <tr key={i}>
+                      <td>{h.date}</td>
+                      <td>{formatNumber(h.price)}</td>
+                      <td>{formatNumber(h.estimatedNav)}</td>
+                      <td style={{ color: h.premiumRate >= 0 ? '#d4380d' : '#52c41a' }}>
+                        {formatPercent(h.premiumRate)}
+                      </td>
+                      <td>{h.errorRate != null ? formatPercent(h.errorRate) : '-'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
