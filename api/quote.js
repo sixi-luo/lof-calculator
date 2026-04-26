@@ -1,15 +1,9 @@
 import { fetchData } from './dataSources.js'
 
-export const config = {
-  api: {
-    bodyParser: false,
-  },
-}
-
 export default async function handler(req, res) {
   const { searchParams } = new URL(req.url, 'http://localhost')
   const code = searchParams.get('code')
-  const market = searchParams.get('market')
+  const market = searchParams.get('market') || null
 
   if (!code) {
     return res.status(400).json({ error: 'Missing code parameter' })
