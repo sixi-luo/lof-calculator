@@ -1,13 +1,7 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 
 const STORAGE_KEY = 'lof_funds_data'
 const HISTORY_KEY = 'lof_history'
-
-const MARKET_CONFIG = {
-  A: { codePrefix: /^[0-5]/, name: 'A股', sinaPrefix: 'sh' },
-  HK: { codePrefix: /^[0-5]/, name: '港股', sinaPrefix: 'hk' },
-  US: { codePrefix: /^[0-5]/, name: '美股', sinaPrefix: 'gb_' }
-}
 
 function detectMarket(code) {
   const cleanCode = code.replace(/[\s\-]/g, '')
@@ -17,96 +11,6 @@ function detectMarket(code) {
   if (/^\d{4,5}/.test(cleanCode) && /^[0-9]/.test(cleanCode)) return 'hk'
   if (/^[a-zA-Z]/.test(cleanCode)) return 'us'
   return null
-}
-
-const MARKET_PREFIXES = {
-  sh: 'sh', sz: 'sz', bj: 'bj', hk: 'hk', us: 'gb_'
-}
-
-async function fetchSinaData(code, market) {
-  const prefix = MARKET_PREFIXES[market] || 'gb_'
-  const symbol = prefix + code
-  
-  const urls = [
-    `https://hq.sinajisu.cn/index.php?symbol=${symbol}&type=detail`,
-    `https://stock.finance.sina.com.cn/fundamentals/api/openapi.php/StockService.getStockInfo?symbol=${symbol}`,
-    `https://api.doctorxiong.club/v1/stock?token=demo&code=${market === 'us' ? code : symbol}`
-  ]
-  
-  for (const url of urls) {
-    try {
-      const response = await fetch(url)
-      if (!response.ok) continue
-      const text = await response.text()
-      const data = parseSinaResponse(text, market)
-      if (data && data.price > 0) return data
-    } catch (e) {
-      continue
-    }
-  }
-  return null
-}
-
-function parseSinaResponse(text, market) {
-  try {
-    if (market === 'us') {
-      const match = text.match(/="([^"]+)"/)
-      if (match) {
-        const data = match[1].split(',')
-        if (data.length >= 10) {
-          return {
-            name: data[0],
-            price: parseFloat(data[1]),
-            change: parseFloat(data[2]),
-            changePercent: parseFloat(data[3]),
-            open: parseFloat(data[6]),
-            high: parseFloat(data[7]),
-            low: parseFloat(data[8]),
-            close: parseFloat(data[9])
-          }
-        }
-      }
-    }
-    
-    const match = text.match(/="([^"]+)"/)
-    if (!match) {
-      try {
-        const json = JSON.parse(text)
-        if (json.data) {
-          const d = json.data
-          return {
-            name: d.name || d.stock_name || code,
-            price: parseFloat(d.price || d.current || 0),
-            change: parseFloat(d.pricechange || d.chg || 0),
-            changePercent: parseFloat(d.percent || d.pct_chg || 0),
-            open: parseFloat(d.open || 0),
-            high: parseFloat(d.high || 0),
-            low: parseFloat(d.low || 0),
-            close: parseFloat(d.close || d.prev_close || 0)
-          }
-        }
-      } catch {}
-      return null
-    }
-    
-    const data = match[1].split(',')
-    if (data.length < 10) return null
-    
-    return {
-      name: data[0],
-      price: parseFloat(data[1]),
-      change: parseFloat(data[2]),
-      changePercent: parseFloat(data[3]),
-      volume: parseInt(data[4]),
-      amount: parseFloat(data[5]),
-      open: parseFloat(data[6]),
-      high: parseFloat(data[7]),
-      low: parseFloat(data[8]),
-      close: parseFloat(data[9])
-    }
-  } catch (e) {
-    return null
-  }
 }
 
 async function fetchFundData(code) {
@@ -147,8 +51,23 @@ function formatPercent(num) {
   return (num >= 0 ? '+' : '') + num.toFixed(2) + '%'
 }
 
+function decodeChinese(text) {
+  if (!text) return ''
+  try {
+    const textarea = document.createElement('textarea')
+    textarea.innerHTML = text
+    return textarea.value || text
+  } catch {
+    return text
+  }
+}
+
 function saveToStorage(data) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(data))
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(data))
+  } catch (e) {
+    console.error('Save storage error:', e)
+  }
 }
 
 function loadFromStorage() {
@@ -188,6 +107,12 @@ function getHistory(fundCode) {
   } catch {
     return []
   }
+}
+
+function formatDate(dateStr) {
+  if (!dateStr) return ''
+  const d = new Date(dateStr)
+  return `${d.getMonth() + 1}/${d.getDate()}`
 }
 
 export default function App() {
@@ -233,8 +158,9 @@ export default function App() {
       const newFund = {
         id: Date.now(),
         code: newFundCode.trim(),
-        name: data.name || newFundCode.trim(),
+        name: decodeChinese(data.name) || newFundCode.trim(),
         market: data.market,
+        source: data.source,
         trackings: [{ id: 1, code: '', weight: 100 }],
         price: data.price,
         change: data.change,
@@ -264,7 +190,7 @@ export default function App() {
     })
   }
 
-  const updateTracking = (fundId, trackingId, field, value) => {
+  const updateTracking = useCallback((fundId, trackingId, field, value) => {
     setFunds(prev => {
       const updated = prev.map(f => {
         if (f.id !== fundId) return f
@@ -278,7 +204,7 @@ export default function App() {
       saveToStorage(updated)
       return updated
     })
-  }
+  }, [])
 
   const addTracking = (fundId) => {
     setFunds(prev => {
@@ -359,8 +285,10 @@ export default function App() {
 
 function FundCard({ fund, onRemove, onUpdateTracking, onAddTracking, onRemoveTracking, onRefresh }) {
   const [trackingData, setTrackingData] = useState({})
+  const [trackingLoading, setTrackingLoading] = useState(false)
   const [showHistory, setShowHistory] = useState(false)
   const [history, setHistory] = useState([])
+  const trackingDataRef = useRef({})
   
   const marketLabels = {
     sh: { label: '上证', class: 'market-a' },
@@ -371,16 +299,13 @@ function FundCard({ fund, onRemove, onUpdateTracking, onAddTracking, onRemoveTra
   }
   
   useEffect(() => {
-    loadTrackingData()
-  }, [fund.trackings])
-  
-  useEffect(() => {
     if (showHistory) {
       setHistory(getHistory(fund.code))
     }
   }, [showHistory, fund.code])
 
-  const loadTrackingData = async () => {
+  const loadTrackingData = useCallback(async () => {
+    setTrackingLoading(true)
     const data = {}
     for (const t of fund.trackings) {
       if (t.code && t.weight > 0) {
@@ -388,8 +313,11 @@ function FundCard({ fund, onRemove, onUpdateTracking, onAddTracking, onRemoveTra
         if (result) data[t.id] = result
       }
     }
+    trackingDataRef.current = data
     setTrackingData(data)
-  }
+    setTrackingLoading(false)
+    return data
+  }, [fund.trackings])
 
   const validTrackings = fund.trackings.filter(t => t.code && t.weight > 0)
   const totalWeight = validTrackings.reduce((sum, t) => sum + t.weight, 0)
@@ -408,7 +336,9 @@ function FundCard({ fund, onRemove, onUpdateTracking, onAddTracking, onRemoveTra
   
   const premiumRate = estimatedNav ? ((fund.price - estimatedNav) / estimatedNav * 100) : null
   
-  const saveCurrentData = () => {
+  const handleRefresh = async () => {
+    await onRefresh()
+    await loadTrackingData()
     if (fund.price && estimatedNav) {
       saveHistory(fund.code, {
         price: fund.price,
@@ -416,8 +346,10 @@ function FundCard({ fund, onRemove, onUpdateTracking, onAddTracking, onRemoveTra
         changePercent: fund.changePercent,
         estimatedNav,
         premiumRate,
-        errorRate: fund.changePercent != null ? Math.abs(fund.changePercent - premiumRate) : null
+        errorRate: fund.changePercent != null ? Math.abs(fund.changePercent - premiumRate) : null,
+        trackingConfig: JSON.stringify(fund.trackings)
       })
+      setHistory(getHistory(fund.code))
     }
   }
 
@@ -425,7 +357,7 @@ function FundCard({ fund, onRemove, onUpdateTracking, onAddTracking, onRemoveTra
     <div className="fund-card">
       <div className="fund-card-header">
         <div>
-          <h3>{fund.name || fund.code}</h3>
+          <h3>{decodeChinese(fund.name) || fund.code}</h3>
           <span style={{ fontSize: '12px', color: '#666' }}>代码: {fund.code}</span>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -438,17 +370,20 @@ function FundCard({ fund, onRemove, onUpdateTracking, onAddTracking, onRemoveTra
 
       <div className="price-info">
         <div className="price-item">
-          <div className="label">市场价格 <span style={{fontSize:'10px',color:'#999'}}>{fund.source}</span></div>
-          <div className="value">{formatNumber(fund.price)}</div>
+          <div className="label">
+            市场价格 
+            <span style={{fontSize:'10px',color:'#999',marginLeft:'4px'}}>{fund.source}</span>
+          </div>
+          <div className="value">{formatNumber(fund.price, 3)}</div>
           {fund.changePercent != null && (
             <div className={`change ${fund.change >= 0 ? 'up' : 'down'}`}>
-              {formatNumber(fund.change)} ({formatPercent(fund.changePercent)})
+              {formatNumber(fund.change, 3)} ({formatPercent(fund.changePercent)})
             </div>
           )}
         </div>
         <div className="price-item">
           <div className="label">估算净值</div>
-          <div className="value">{estimatedNav ? formatNumber(estimatedNav) : '-'}</div>
+          <div className="value">{estimatedNav ? formatNumber(estimatedNav, 4) : '-'}</div>
           {estimatedNav && premiumRate != null && (
             <div className={`change ${premiumRate >= 0 ? 'up' : 'down'}`}>
               折溢价: {formatPercent(premiumRate)}
@@ -478,7 +413,7 @@ function FundCard({ fund, onRemove, onUpdateTracking, onAddTracking, onRemoveTra
                 onChange={e => onUpdateTracking(fund.id, t.id, 'weight', parseInt(e.target.value) || 0)}
               />
               <div style={{ fontSize: '12px', color: '#666', textAlign: 'center' }}>
-                {trackingData[t.id] ? `¥${formatNumber(trackingData[t.id].price)}` : '-'}
+                {trackingData[t.id] ? `¥${formatNumber(trackingData[t.id].price, 3)}` : '-'}
               </div>
               <button className="remove-btn" onClick={() => onRemoveTracking(fund.id, t.id)}>×</button>
             </div>
@@ -494,40 +429,49 @@ function FundCard({ fund, onRemove, onUpdateTracking, onAddTracking, onRemoveTra
       <button 
         className="btn btn-secondary" 
         style={{ width: '100%', marginBottom: '12px' }}
-        onClick={() => { loadTrackingData(); saveCurrentData(); }}
+        onClick={handleRefresh}
+        disabled={trackingLoading}
       >
-        刷新数据并存
+        {trackingLoading ? '刷新中...' : '刷新数据并保存'}
       </button>
 
       <div className="history-section">
         <button className="history-toggle" onClick={() => setShowHistory(!showHistory)}>
           <span className={`arrow ${showHistory ? 'expanded' : ''}`}>▶</span>
-          近30天历史
+          近30天历史 {history.length > 0 && `(${history.length}天)`}
         </button>
         
         {showHistory && (
           <div className="history-table">
             {history.length === 0 ? (
-              <p style={{ textAlign: 'center', color: '#999', padding: '20px' }}>暂无历史数据</p>
+              <p style={{ textAlign: 'center', color: '#999', padding: '20px' }}>暂无历史数据，点击"刷新数据并保存"记录今日数据</p>
             ) : (
               <table>
                 <thead>
                   <tr>
                     <th>日期</th>
-                    <th>价格</th>
+                    <th>收盘价</th>
+                    <th>涨跌幅</th>
                     <th>估算净值</th>
-                    <th>折溢价率</th>
+                    <th>估算折溢价</th>
+                    <th>实际折溢价</th>
                     <th>估算误差</th>
                   </tr>
                 </thead>
                 <tbody>
                   {history.map((h, i) => (
                     <tr key={i}>
-                      <td>{h.date}</td>
-                      <td>{formatNumber(h.price)}</td>
-                      <td>{formatNumber(h.estimatedNav)}</td>
-                      <td style={{ color: h.premiumRate >= 0 ? '#d4380d' : '#52c41a' }}>
+                      <td>{formatDate(h.date)}</td>
+                      <td>{formatNumber(h.price, 3)}</td>
+                      <td style={{ color: (h.changePercent || 0) >= 0 ? '#d4380d' : '#52c41a' }}>
+                        {formatPercent(h.changePercent)}
+                      </td>
+                      <td>{formatNumber(h.estimatedNav, 4)}</td>
+                      <td style={{ color: (h.premiumRate || 0) >= 0 ? '#d4380d' : '#52c41a' }}>
                         {formatPercent(h.premiumRate)}
+                      </td>
+                      <td style={{ color: (h.actualPremiumRate || 0) >= 0 ? '#d4380d' : '#52c41a' }}>
+                        {formatPercent(h.actualPremiumRate)}
                       </td>
                       <td>{h.errorRate != null ? formatPercent(h.errorRate) : '-'}</td>
                     </tr>
