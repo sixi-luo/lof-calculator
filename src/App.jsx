@@ -41,6 +41,17 @@ async function fetchFundData(code) {
   return null
 }
 
+async function fetchHistoryData(code, market) {
+  try {
+    const response = await fetch(`/api/history?code=${code}&market=${market || ''}`)
+    if (response.ok) {
+      const data = await response.json()
+      return data
+    }
+  } catch {}
+  return null
+}
+
 function formatNumber(num, decimals = 2) {
   if (num == null || isNaN(num)) return '-'
   return num.toFixed(decimals)
@@ -288,6 +299,8 @@ function FundCard({ fund, onRemove, onUpdateTracking, onAddTracking, onRemoveTra
   const [trackingLoading, setTrackingLoading] = useState(false)
   const [showHistory, setShowHistory] = useState(false)
   const [history, setHistory] = useState([])
+  const [historyLoading, setHistoryLoading] = useState(false)
+  const [savedHistory, setSavedHistory] = useState([])
   const trackingDataRef = useRef({})
   
   const marketLabels = {
@@ -299,10 +312,40 @@ function FundCard({ fund, onRemove, onUpdateTracking, onAddTracking, onRemoveTra
   }
   
   useEffect(() => {
-    if (showHistory) {
-      setHistory(getHistory(fund.code))
+    setSavedHistory(getHistory(fund.code))
+  }, [fund.code])
+
+  useEffect(() => {
+    if (showHistory && history.length === 0) {
+      loadHistoryFromApi()
     }
-  }, [showHistory, fund.code])
+  }, [showHistory])
+
+  const loadHistoryFromApi = async () => {
+    setHistoryLoading(true)
+    try {
+      const apiData = await fetchHistoryData(fund.code, fund.market)
+      const saved = getHistory(fund.code)
+      
+      if (apiData && apiData.data && apiData.data.length > 0) {
+        const combined = apiData.data.map(h => {
+          const savedItem = saved.find(s => s.date === h.date)
+          return {
+            ...h,
+            premiumRate: savedItem ? savedItem.premiumRate : null,
+            errorRate: savedItem ? savedItem.errorRate : null,
+            trackingConfig: savedItem ? savedItem.trackingConfig : null
+          }
+        })
+        setHistory(combined)
+      } else {
+        setHistory(saved)
+      }
+    } catch {
+      setHistory(saved)
+    }
+    setHistoryLoading(false)
+  }
 
   const loadTrackingData = useCallback(async () => {
     setTrackingLoading(true)
@@ -349,7 +392,10 @@ function FundCard({ fund, onRemove, onUpdateTracking, onAddTracking, onRemoveTra
         errorRate: fund.changePercent != null ? Math.abs(fund.changePercent - premiumRate) : null,
         trackingConfig: JSON.stringify(fund.trackings)
       })
-      setHistory(getHistory(fund.code))
+      setSavedHistory(getHistory(fund.code))
+      if (showHistory) {
+        loadHistoryFromApi()
+      }
     }
   }
 
@@ -436,14 +482,19 @@ function FundCard({ fund, onRemove, onUpdateTracking, onAddTracking, onRemoveTra
       </button>
 
       <div className="history-section">
-        <button className="history-toggle" onClick={() => setShowHistory(!showHistory)}>
+        <button className="history-toggle" onClick={() => { 
+          setShowHistory(!showHistory)
+          if (!showHistory && history.length === 0) loadHistoryFromApi()
+        }}>
           <span className={`arrow ${showHistory ? 'expanded' : ''}`}>▶</span>
-          近30天历史 {history.length > 0 && `(${history.length}天)`}
+          近30天历史 {(history.length > 0 || savedHistory.length > 0) && `(${(history.length || savedHistory.length)}天)`}
         </button>
         
         {showHistory && (
           <div className="history-table">
-            {history.length === 0 ? (
+            {historyLoading ? (
+              <p style={{ textAlign: 'center', color: '#999', padding: '20px' }}>加载中...</p>
+            ) : history.length === 0 && savedHistory.length === 0 ? (
               <p style={{ textAlign: 'center', color: '#999', padding: '20px' }}>暂无历史数据，点击"刷新数据并保存"记录今日数据</p>
             ) : (
               <table>
@@ -454,28 +505,31 @@ function FundCard({ fund, onRemove, onUpdateTracking, onAddTracking, onRemoveTra
                     <th>涨跌幅</th>
                     <th>估算净值</th>
                     <th>估算折溢价</th>
-                    <th>实际折溢价</th>
                     <th>估算误差</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {history.map((h, i) => (
-                    <tr key={i}>
-                      <td>{formatDate(h.date)}</td>
-                      <td>{formatNumber(h.price, 3)}</td>
-                      <td style={{ color: (h.changePercent || 0) >= 0 ? '#d4380d' : '#52c41a' }}>
-                        {formatPercent(h.changePercent)}
-                      </td>
-                      <td>{formatNumber(h.estimatedNav, 4)}</td>
-                      <td style={{ color: (h.premiumRate || 0) >= 0 ? '#d4380d' : '#52c41a' }}>
-                        {formatPercent(h.premiumRate)}
-                      </td>
-                      <td style={{ color: (h.actualPremiumRate || 0) >= 0 ? '#d4380d' : '#52c41a' }}>
-                        {formatPercent(h.actualPremiumRate)}
-                      </td>
-                      <td>{h.errorRate != null ? formatPercent(h.errorRate) : '-'}</td>
-                    </tr>
-                  ))}
+                  {(history.length > 0 ? history : savedHistory).map((h, i) => {
+                    const changePercent = h.changePercent !== undefined 
+                      ? h.changePercent 
+                      : i > 0 
+                        ? ((h.close - ((history[i+1] || savedHistory[i+1] || {}).close)) / ((history[i+1] || savedHistory[i+1] || {}).close || h.close) * 100)
+                        : 0
+                    return (
+                      <tr key={i}>
+                        <td>{formatDate(h.date)}</td>
+                        <td>{formatNumber(h.close || h.price, 3)}</td>
+                        <td style={{ color: (changePercent || 0) >= 0 ? '#d4380d' : '#52c41a' }}>
+                          {formatPercent(changePercent)}
+                        </td>
+                        <td>{formatNumber(h.estimatedNav, 4)}</td>
+                        <td style={{ color: (h.premiumRate || 0) >= 0 ? '#d4380d' : '#52c41a' }}>
+                          {formatPercent(h.premiumRate)}
+                        </td>
+                        <td>{h.errorRate != null ? formatPercent(h.errorRate) : '-'}</td>
+                      </tr>
+                    )
+                  })}
                 </tbody>
               </table>
             )}
