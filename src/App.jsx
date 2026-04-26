@@ -343,6 +343,9 @@ function FundCard({ fund, onRemove, onUpdateTracking, onAddTracking, onRemoveTra
       const saved = getHistory(fund.code)
       
       if (apiData && apiData.data && apiData.data.length > 0) {
+        const validTrackings = fund.trackings.filter(t => t.code && t.weight > 0)
+        const totalWeight = validTrackings.reduce((sum, t) => sum + t.weight, 0)
+        
         const combined = apiData.data.map((h, idx) => {
           const savedItem = saved.find(s => s.date === h.date)
           const prevDay = idx < apiData.data.length - 1 ? apiData.data[idx + 1] : null
@@ -352,35 +355,45 @@ function FundCard({ fund, onRemove, onUpdateTracking, onAddTracking, onRemoveTra
             changePercent = ((h.close - prevDay.close) / prevDay.close) * 100
           }
           
+          let trackingConfig = null
+          let estimatedNav = null
+          let estimatedPremiumRate = null
+          
+          if (savedItem && savedItem.trackingConfig) {
+            try {
+              trackingConfig = JSON.parse(savedItem.trackingConfig)
+            } catch {}
+          }
+          
+          if (!trackingConfig && validTrackings.length > 0 && totalWeight === 100) {
+            trackingConfig = fund.trackings
+          }
+          
+          let actualNav = null
           let actualPremiumRate = null
-          if (savedItem && savedItem.actualNav && h.close) {
-            actualPremiumRate = ((h.close - savedItem.actualNav) / savedItem.actualNav) * 100
+          
+          if (savedItem && savedItem.actualNav) {
+            actualNav = savedItem.actualNav
+          } else if (savedItem && savedItem.estimatedNav) {
+            actualNav = savedItem.estimatedNav
+          }
+          
+          if (actualNav && h.close) {
+            actualPremiumRate = ((h.close - actualNav) / actualNav) * 100
           }
           
           return {
             date: h.date,
-            open: h.open,
             close: h.close,
-            high: h.high,
-            low: h.low,
-            volume: h.volume,
             changePercent,
-            actualNav: savedItem ? savedItem.actualNav : null,
+            actualNav,
             actualPremiumRate,
             estimatedNav: savedItem ? savedItem.estimatedNav : null,
             estimatedPremiumRate: savedItem ? savedItem.estimatedPremiumRate : null,
-            premiumError: savedItem ? savedItem.premiumError : null
+            premiumError: savedItem ? savedItem.premiumError : null,
+            hasTrackingConfig: trackingConfig !== null
           }
         })
-        
-        if (apiData.nav && apiData.nav.nav) {
-          const todayStr = new Date().toISOString().split('T')[0]
-          const todayKline = combined.find(h => h.date === todayStr)
-          if (todayKline) {
-            todayKline.actualNav = apiData.nav.nav
-            todayKline.actualPremiumRate = ((todayKline.close - apiData.nav.nav) / apiData.nav.nav) * 100
-          }
-        }
         
         setHistory(combined)
       } else {
@@ -392,11 +405,13 @@ function FundCard({ fund, onRemove, onUpdateTracking, onAddTracking, onRemoveTra
           actualPremiumRate: h.actualPremiumRate,
           estimatedNav: h.estimatedNav,
           estimatedPremiumRate: h.premiumRate,
-          premiumError: h.errorRate
+          premiumError: h.errorRate,
+          hasTrackingConfig: true
         })))
       }
     } catch (e) {
       console.error('Load history error:', e)
+      const saved = getHistory(fund.code)
       setHistory(saved.map(h => ({
         date: h.date,
         close: h.price,
@@ -405,7 +420,8 @@ function FundCard({ fund, onRemove, onUpdateTracking, onAddTracking, onRemoveTra
         actualPremiumRate: h.actualPremiumRate,
         estimatedNav: h.estimatedNav,
         estimatedPremiumRate: h.premiumRate,
-        premiumError: h.errorRate
+        premiumError: h.errorRate,
+        hasTrackingConfig: true
       })))
     }
     setHistoryLoading(false)
@@ -591,7 +607,13 @@ function FundCard({ fund, onRemove, onUpdateTracking, onAddTracking, onRemoveTra
                       <td style={{ color: (h.changePercent || 0) >= 0 ? '#d4380d' : '#52c41a' }}>
                         {formatPercent(h.changePercent)}
                       </td>
-                      <td>{h.estimatedNav ? formatNumber(h.estimatedNav, 4) : '-'}</td>
+                      <td>
+                        {h.estimatedNav ? (
+                          formatNumber(h.estimatedNav, 4)
+                        ) : h.hasTrackingConfig ? (
+                          <span style={{ color: '#999', fontSize: '11px' }}>未保存</span>
+                        ) : '-'}
+                      </td>
                       <td style={{ color: (h.estimatedPremiumRate || 0) >= 0 ? '#d4380d' : '#52c41a' }}>
                         {h.estimatedPremiumRate != null ? formatPercent(h.estimatedPremiumRate) : '-'}
                       </td>
