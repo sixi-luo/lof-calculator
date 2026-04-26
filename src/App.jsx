@@ -343,21 +343,70 @@ function FundCard({ fund, onRemove, onUpdateTracking, onAddTracking, onRemoveTra
       const saved = getHistory(fund.code)
       
       if (apiData && apiData.data && apiData.data.length > 0) {
-        const combined = apiData.data.map(h => {
+        const combined = apiData.data.map((h, idx) => {
           const savedItem = saved.find(s => s.date === h.date)
+          const prevDay = idx < apiData.data.length - 1 ? apiData.data[idx + 1] : null
+          
+          let changePercent = 0
+          if (prevDay && prevDay.close && prevDay.close > 0) {
+            changePercent = ((h.close - prevDay.close) / prevDay.close) * 100
+          }
+          
+          let actualPremiumRate = null
+          if (savedItem && savedItem.actualNav && h.close) {
+            actualPremiumRate = ((h.close - savedItem.actualNav) / savedItem.actualNav) * 100
+          }
+          
           return {
-            ...h,
-            premiumRate: savedItem ? savedItem.premiumRate : null,
-            errorRate: savedItem ? savedItem.errorRate : null,
-            trackingConfig: savedItem ? savedItem.trackingConfig : null
+            date: h.date,
+            open: h.open,
+            close: h.close,
+            high: h.high,
+            low: h.low,
+            volume: h.volume,
+            changePercent,
+            actualNav: savedItem ? savedItem.actualNav : null,
+            actualPremiumRate,
+            estimatedNav: savedItem ? savedItem.estimatedNav : null,
+            estimatedPremiumRate: savedItem ? savedItem.estimatedPremiumRate : null,
+            premiumError: savedItem ? savedItem.premiumError : null
           }
         })
+        
+        if (apiData.nav && apiData.nav.nav) {
+          const todayStr = new Date().toISOString().split('T')[0]
+          const todayKline = combined.find(h => h.date === todayStr)
+          if (todayKline) {
+            todayKline.actualNav = apiData.nav.nav
+            todayKline.actualPremiumRate = ((todayKline.close - apiData.nav.nav) / apiData.nav.nav) * 100
+          }
+        }
+        
         setHistory(combined)
       } else {
-        setHistory(saved)
+        setHistory(saved.map(h => ({
+          date: h.date,
+          close: h.price,
+          changePercent: h.changePercent,
+          actualNav: h.actualNav,
+          actualPremiumRate: h.actualPremiumRate,
+          estimatedNav: h.estimatedNav,
+          estimatedPremiumRate: h.premiumRate,
+          premiumError: h.errorRate
+        })))
       }
-    } catch {
-      setHistory(saved)
+    } catch (e) {
+      console.error('Load history error:', e)
+      setHistory(saved.map(h => ({
+        date: h.date,
+        close: h.price,
+        changePercent: h.changePercent,
+        actualNav: h.actualNav,
+        actualPremiumRate: h.actualPremiumRate,
+        estimatedNav: h.estimatedNav,
+        estimatedPremiumRate: h.premiumRate,
+        premiumError: h.errorRate
+      })))
     }
     setHistoryLoading(false)
   }
@@ -402,9 +451,11 @@ function FundCard({ fund, onRemove, onUpdateTracking, onAddTracking, onRemoveTra
         price: fund.price,
         change: fund.change,
         changePercent: fund.changePercent,
+        actualNav: null,
+        actualPremiumRate: null,
         estimatedNav,
-        premiumRate,
-        errorRate: fund.changePercent != null ? Math.abs(fund.changePercent - premiumRate) : null,
+        estimatedPremiumRate: premiumRate,
+        premiumError: fund.changePercent != null ? Math.abs(fund.changePercent - premiumRate) : null,
         trackingConfig: JSON.stringify(fund.trackings)
       })
       setSavedHistory(getHistory(fund.code))
@@ -528,31 +579,28 @@ function FundCard({ fund, onRemove, onUpdateTracking, onAddTracking, onRemoveTra
                     <th>涨跌幅</th>
                     <th>估算净值</th>
                     <th>估算折溢价</th>
-                    <th>估算误差</th>
+                    <th>实际折溢价</th>
+                    <th>折溢价误差</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {(history.length > 0 ? history : savedHistory).map((h, i) => {
-                    const changePercent = h.changePercent !== undefined 
-                      ? h.changePercent 
-                      : i > 0 
-                        ? ((h.close - ((history[i+1] || savedHistory[i+1] || {}).close)) / ((history[i+1] || savedHistory[i+1] || {}).close || h.close) * 100)
-                        : 0
-                    return (
-                      <tr key={i}>
-                        <td>{formatDate(h.date)}</td>
-                        <td>{formatNumber(h.close || h.price, 3)}</td>
-                        <td style={{ color: (changePercent || 0) >= 0 ? '#d4380d' : '#52c41a' }}>
-                          {formatPercent(changePercent)}
-                        </td>
-                        <td>{formatNumber(h.estimatedNav, 4)}</td>
-                        <td style={{ color: (h.premiumRate || 0) >= 0 ? '#d4380d' : '#52c41a' }}>
-                          {formatPercent(h.premiumRate)}
-                        </td>
-                        <td>{h.errorRate != null ? formatPercent(h.errorRate) : '-'}</td>
-                      </tr>
-                    )
-                  })}
+                  {(history.length > 0 ? history : savedHistory).map((h, i) => (
+                    <tr key={i}>
+                      <td>{formatDate(h.date)}</td>
+                      <td>{formatNumber(h.close || h.price, 3)}</td>
+                      <td style={{ color: (h.changePercent || 0) >= 0 ? '#d4380d' : '#52c41a' }}>
+                        {formatPercent(h.changePercent)}
+                      </td>
+                      <td>{h.estimatedNav ? formatNumber(h.estimatedNav, 4) : '-'}</td>
+                      <td style={{ color: (h.estimatedPremiumRate || 0) >= 0 ? '#d4380d' : '#52c41a' }}>
+                        {h.estimatedPremiumRate != null ? formatPercent(h.estimatedPremiumRate) : '-'}
+                      </td>
+                      <td style={{ color: (h.actualPremiumRate || 0) >= 0 ? '#d4380d' : '#52c41a' }}>
+                        {h.actualPremiumRate != null ? formatPercent(h.actualPremiumRate) : '-'}
+                      </td>
+                      <td>{h.premiumError != null ? formatPercent(h.premiumError) : '-'}</td>
+                    </tr>
+                  ))}
                 </tbody>
               </table>
             )}
