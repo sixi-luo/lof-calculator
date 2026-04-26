@@ -339,47 +339,69 @@ function FundCard({ fund, onRemove, onUpdateTracking, onAddTracking, onRemoveTra
   const loadHistoryFromApi = async () => {
     setHistoryLoading(true)
     try {
-      const apiData = await fetchHistoryData(fund.code, fund.market)
-      const saved = getHistory(fund.code)
+      const validTrackings = fund.trackings.filter(t => t.code && t.weight > 0)
+      const totalWeight = validTrackings.reduce((sum, t) => sum + t.weight, 0)
+      const trackingParam = validTrackings.length > 0 && totalWeight === 100 
+        ? encodeURIComponent(JSON.stringify(validTrackings.map(t => ({ code: t.code, weight: t.weight }))))
+        : ''
       
-      if (apiData && apiData.data && apiData.data.length > 0) {
-        const validTrackings = fund.trackings.filter(t => t.code && t.weight > 0)
-        const totalWeight = validTrackings.reduce((sum, t) => sum + t.weight, 0)
+      const apiData = await fetch(`/api/history?code=${fund.code}&market=${fund.market || ''}&tracking=${trackingParam}`)
+      const result = await apiData.json()
+      
+      if (result && result.data && result.data.length > 0) {
+        const navMap = result.navMap || {}
+        const trackingData = result.trackingData || {}
         
-        const combined = apiData.data.map((h, idx) => {
-          const savedItem = saved.find(s => s.date === h.date)
-          const prevDay = idx < apiData.data.length - 1 ? apiData.data[idx + 1] : null
+        const combined = result.data.map((h, idx) => {
+          const prevDay = idx < result.data.length - 1 ? result.data[idx + 1] : null
           
           let changePercent = 0
           if (prevDay && prevDay.close && prevDay.close > 0) {
             changePercent = ((h.close - prevDay.close) / prevDay.close) * 100
           }
           
-          let trackingConfig = null
+          const actualNav = navMap[h.date] || null
+          let actualPremiumRate = null
+          if (actualNav && h.close) {
+            actualPremiumRate = ((h.close - actualNav) / actualNav) * 100
+          }
+          
           let estimatedNav = null
           let estimatedPremiumRate = null
           
-          if (savedItem && savedItem.trackingConfig) {
-            try {
-              trackingConfig = JSON.parse(savedItem.trackingConfig)
-            } catch {}
+          if (validTrackings.length > 0 && totalWeight === 100) {
+            let weightedChange = 0
+            let hasAllData = true
+            
+            for (const t of validTrackings) {
+              const td = trackingData[t.code]
+              if (td && td.data) {
+                const tdDay = td.data.find(d => d.date === h.date)
+                const tdPrevDay = td.data.find(d => d.date === prevDay?.date)
+                if (tdDay && tdPrevDay && tdPrevDay.close > 0) {
+                  const tdChange = ((tdDay.close - tdPrevDay.close) / tdPrevDay.close) * 100
+                  weightedChange += tdChange * (t.weight / 100)
+                } else {
+                  hasAllData = false
+                  break
+                }
+              } else {
+                hasAllData = false
+                break
+              }
+            }
+            
+            if (hasAllData) {
+              estimatedNav = h.close / (1 + weightedChange / 100)
+              if (estimatedNav) {
+                estimatedPremiumRate = ((h.close - estimatedNav) / estimatedNav) * 100
+              }
+            }
           }
           
-          if (!trackingConfig && validTrackings.length > 0 && totalWeight === 100) {
-            trackingConfig = fund.trackings
-          }
-          
-          let actualNav = null
-          let actualPremiumRate = null
-          
-          if (savedItem && savedItem.actualNav) {
-            actualNav = savedItem.actualNav
-          } else if (savedItem && savedItem.estimatedNav) {
-            actualNav = savedItem.estimatedNav
-          }
-          
-          if (actualNav && h.close) {
-            actualPremiumRate = ((h.close - actualNav) / actualNav) * 100
+          let premiumError = null
+          if (actualPremiumRate != null && estimatedPremiumRate != null) {
+            premiumError = actualPremiumRate - estimatedPremiumRate
           }
           
           return {
@@ -388,41 +410,20 @@ function FundCard({ fund, onRemove, onUpdateTracking, onAddTracking, onRemoveTra
             changePercent,
             actualNav,
             actualPremiumRate,
-            estimatedNav: savedItem ? savedItem.estimatedNav : null,
-            estimatedPremiumRate: savedItem ? savedItem.estimatedPremiumRate : null,
-            premiumError: savedItem ? savedItem.premiumError : null,
-            hasTrackingConfig: trackingConfig !== null
+            estimatedNav,
+            estimatedPremiumRate,
+            premiumError
           }
         })
         
         setHistory(combined)
+        setSavedHistory([])
       } else {
-        setHistory(saved.map(h => ({
-          date: h.date,
-          close: h.price,
-          changePercent: h.changePercent,
-          actualNav: h.actualNav,
-          actualPremiumRate: h.actualPremiumRate,
-          estimatedNav: h.estimatedNav,
-          estimatedPremiumRate: h.premiumRate,
-          premiumError: h.errorRate,
-          hasTrackingConfig: true
-        })))
+        setHistory([])
       }
     } catch (e) {
       console.error('Load history error:', e)
-      const saved = getHistory(fund.code)
-      setHistory(saved.map(h => ({
-        date: h.date,
-        close: h.price,
-        changePercent: h.changePercent,
-        actualNav: h.actualNav,
-        actualPremiumRate: h.actualPremiumRate,
-        estimatedNav: h.estimatedNav,
-        estimatedPremiumRate: h.premiumRate,
-        premiumError: h.errorRate,
-        hasTrackingConfig: true
-      })))
+      setHistory([])
     }
     setHistoryLoading(false)
   }
@@ -593,32 +594,28 @@ function FundCard({ fund, onRemove, onUpdateTracking, onAddTracking, onRemoveTra
                     <th>日期</th>
                     <th>收盘价</th>
                     <th>涨跌幅</th>
+                    <th>实际净值</th>
+                    <th>实际折溢价</th>
                     <th>估算净值</th>
                     <th>估算折溢价</th>
-                    <th>实际折溢价</th>
-                    <th>折溢价误差</th>
+                    <th>误差</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {(history.length > 0 ? history : savedHistory).map((h, i) => (
+                  {history.map((h, i) => (
                     <tr key={i}>
                       <td>{formatDate(h.date)}</td>
-                      <td>{formatNumber(h.close || h.price, 3)}</td>
+                      <td>{formatNumber(h.close, 3)}</td>
                       <td style={{ color: (h.changePercent || 0) >= 0 ? '#d4380d' : '#52c41a' }}>
                         {formatPercent(h.changePercent)}
                       </td>
-                      <td>
-                        {h.estimatedNav ? (
-                          formatNumber(h.estimatedNav, 4)
-                        ) : h.hasTrackingConfig ? (
-                          <span style={{ color: '#999', fontSize: '11px' }}>未保存</span>
-                        ) : '-'}
-                      </td>
-                      <td style={{ color: (h.estimatedPremiumRate || 0) >= 0 ? '#d4380d' : '#52c41a' }}>
-                        {h.estimatedPremiumRate != null ? formatPercent(h.estimatedPremiumRate) : '-'}
-                      </td>
+                      <td>{h.actualNav ? formatNumber(h.actualNav, 4) : '-'}</td>
                       <td style={{ color: (h.actualPremiumRate || 0) >= 0 ? '#d4380d' : '#52c41a' }}>
                         {h.actualPremiumRate != null ? formatPercent(h.actualPremiumRate) : '-'}
+                      </td>
+                      <td>{h.estimatedNav ? formatNumber(h.estimatedNav, 4) : '-'}</td>
+                      <td style={{ color: (h.estimatedPremiumRate || 0) >= 0 ? '#d4380d' : '#52c41a' }}>
+                        {h.estimatedPremiumRate != null ? formatPercent(h.estimatedPremiumRate) : '-'}
                       </td>
                       <td>{h.premiumError != null ? formatPercent(h.premiumError) : '-'}</td>
                     </tr>
